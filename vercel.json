@@ -1,0 +1,9 @@
+{
+  "functions": {
+    "app/api/traffic/route.ts": {
+      "maxDuration": 300
+    }
+  },
+  "installCommand": "npm install && npx playwright install chromium --with-deps"
+}
+

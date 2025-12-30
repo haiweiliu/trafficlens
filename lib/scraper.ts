@@ -56,9 +56,19 @@ export async function scrapeTrafficData(
   let browser: Browser | null = null;
 
   try {
+    // Configure Playwright for Vercel/serverless environments
     browser = await chromium.launch({
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process', // Important for serverless
+        '--disable-gpu',
+      ],
     });
 
     const context = await browser.newContext({
