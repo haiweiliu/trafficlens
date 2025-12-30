@@ -56,49 +56,17 @@ export async function scrapeTrafficData(
   let browser: Browser | null = null;
 
   try {
-    // Use serverless-compatible Chromium for Vercel
-    // For local dev, use regular Playwright; for Vercel, use @sparticuz/chromium
-    const isVercel = process.env.VERCEL === '1' && chromium !== null;
-    
-    let executablePath: string | undefined;
-    let launchArgs: string[];
-
-    if (isVercel && chromium) {
-      // Vercel/serverless: Use @sparticuz/chromium
-      try {
-        // Set font path for @sparticuz/chromium
-        chromium.setGraphicsMode(false);
-        executablePath = await chromium.executablePath();
-        launchArgs = chromium.args;
-      } catch (e) {
-        console.error('Error getting chromium executable:', e);
-        // Fallback to default
-        executablePath = undefined;
-        launchArgs = [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-        ];
-      }
-    } else {
-      // Local dev: Use regular Playwright
-      executablePath = undefined;
-      launchArgs = [
+    // Launch Chromium browser (works perfectly on Railway with full filesystem access)
+    browser = await chromium.launch({
+      headless: true,
+      args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-accelerated-2d-canvas',
         '--no-first-run',
-        '--no-zygote',
-        '--single-process',
         '--disable-gpu',
-      ];
-    }
-
-    browser = await playwrightChromium.launch({
-      headless: true,
-      executablePath,
-      args: launchArgs,
+      ],
     });
 
     const context = await browser.newContext({
