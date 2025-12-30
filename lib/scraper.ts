@@ -3,8 +3,17 @@
  */
 
 import { chromium as playwrightChromium, Browser, Page } from 'playwright-core';
-import chromium from '@sparticuz/chromium';
 import { parseNumberWithSuffix, parseDurationToSeconds, parsePercentage } from './parsing-utils';
+
+// Dynamically import @sparticuz/chromium only on Vercel
+let chromium: any = null;
+if (process.env.VERCEL === '1') {
+  try {
+    chromium = require('@sparticuz/chromium');
+  } catch (e) {
+    console.warn('@sparticuz/chromium not available, using default Playwright');
+  }
+}
 
 export interface TrafficData {
   domain: string;
@@ -59,15 +68,28 @@ export async function scrapeTrafficData(
   try {
     // Use serverless-compatible Chromium for Vercel
     // For local dev, use regular Playwright; for Vercel, use @sparticuz/chromium
-    const isVercel = process.env.VERCEL === '1';
+    const isVercel = process.env.VERCEL === '1' && chromium !== null;
     
     let executablePath: string | undefined;
     let launchArgs: string[];
 
-    if (isVercel) {
+    if (isVercel && chromium) {
       // Vercel/serverless: Use @sparticuz/chromium
-      executablePath = await chromium.executablePath();
-      launchArgs = chromium.args;
+      try {
+        // Set font path for @sparticuz/chromium
+        chromium.setGraphicsMode(false);
+        executablePath = await chromium.executablePath();
+        launchArgs = chromium.args;
+      } catch (e) {
+        console.error('Error getting chromium executable:', e);
+        // Fallback to default
+        executablePath = undefined;
+        launchArgs = [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+        ];
+      }
     } else {
       // Local dev: Use regular Playwright
       executablePath = undefined;
