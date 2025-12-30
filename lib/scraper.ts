@@ -62,32 +62,30 @@ export async function scrapeTrafficData(
 
     const context = await browser.newContext({
       userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      // Optimize bandwidth: Block images, fonts, stylesheets (we only need text/HTML)
       ignoreHTTPSErrors: true,
     });
 
     const page = await context.newPage();
     
-    // Set timeout for page load
-    page.setDefaultTimeout(60000); // Increased to 60s for slow pages
+    // Optimize: Block unnecessary resources for faster loading
+    await page.route('**/*', (route) => {
+      const resourceType = route.request().resourceType();
+      // Block images, fonts, stylesheets, media, websocket, manifest, other
+      if (['image', 'stylesheet', 'font', 'media', 'websocket', 'manifest', 'other'].includes(resourceType)) {
+        route.abort();
+      } else {
+        route.continue();
+      }
+    });
+    
+    // Optimize: Reduced timeouts for faster processing
+    page.setDefaultTimeout(20000); // Reduced from 60s to 20s
 
     // Navigate to the bulk checker page
     console.log(`Navigating to: ${url}`);
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 }); // Reduced from 30s to 15s
 
-    // Wait for the page to be interactive - use shorter timeout
-    await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {
-      // Continue even if networkidle times out
-    });
-
-    // Wait for loading indicator to disappear
-    try {
-      await page.waitForSelector('text=/Loading/i', { state: 'hidden', timeout: 10000 }).catch(() => {});
-    } catch (e) {
-      // Ignore if loading text doesn't exist
-    }
-
-    // Wait for results to appear - optimized selectors
+    // Optimize: Wait for results with shorter timeout
     let resultsFound = false;
     const possibleSelectors = [
       '[class*="card"]',  // Most likely for card view
@@ -96,9 +94,10 @@ export async function scrapeTrafficData(
       '[class*="domain"]',
     ];
 
+    // Wait for results to appear - try selectors with shorter timeout
     for (const selector of possibleSelectors) {
       try {
-        await page.waitForSelector(selector, { timeout: 3000 });
+        await page.waitForSelector(selector, { timeout: 2000 }); // Reduced from 3s to 2s
         resultsFound = true;
         break;
       } catch (e) {
@@ -106,11 +105,13 @@ export async function scrapeTrafficData(
       }
     }
 
-    // Reduced wait time - only wait if we found results
+    // Optimize: Minimal wait time - only wait if we found results
     if (resultsFound) {
-      await page.waitForTimeout(3000); // Reduced from 8000ms
+      // Wait just enough for data to render (reduced from 3s to 1.5s)
+      await page.waitForTimeout(1500);
     } else {
-      await page.waitForTimeout(5000); // Give a bit more time if no selector found
+      // Give a bit more time if no selector found (reduced from 5s to 3s)
+      await page.waitForTimeout(3000);
     }
 
     // Minimal debug logging for performance
@@ -713,12 +714,19 @@ async function extractFromCards(page: Page, domains: string[]): Promise<TrafficD
 
         // Only add result if we found at least the domain and one metric
         if (domain && (monthlyVisits !== null || avgSessionDuration !== null)) {
-          // Extract historical months data from the "Visits Over Time" graph
+          // Extract historical months data (optional, non-blocking for speed)
+          // Only extract if we have time - don't wait too long
           let historicalMonths: HistoricalMonthData[] = [];
           try {
-            historicalMonths = await extractHistoricalMonths(page, domain);
+            // Use Promise.race to limit historical extraction time to 2s max
+            historicalMonths = await Promise.race([
+              extractHistoricalMonths(page, domain),
+              new Promise<HistoricalMonthData[]>((resolve) => 
+                setTimeout(() => resolve([]), 2000) // Timeout after 2s
+              ),
+            ]);
           } catch (error) {
-            console.error(`Error extracting historical months for ${domain}:`, error);
+            // Silently fail - historical data is optional
           }
 
           results.push({

@@ -21,8 +21,8 @@ export async function extractHistoricalMonths(
   const results: HistoricalMonthData[] = [];
   
   try {
-    // Wait a bit for graph to render
-    await page.waitForTimeout(2000);
+    // Optimize: Reduced wait time for graph to render
+    await page.waitForTimeout(500); // Reduced from 2000ms to 500ms
     // Look for the "Visits Over Time" graph
     // It could be in various formats: SVG, canvas, or text-based
     // Try multiple selectors

@@ -40,7 +40,7 @@ interface TrafficResponse {
 /**
  * Rate limiting: delay between batches (in milliseconds)
  */
-const BATCH_DELAY_MS = 3000; // 3 seconds between batches (reduced for parallel processing)
+const BATCH_DELAY_MS = 2000; // 2 seconds between batches (optimized for speed)
 
 /**
  * Parallel processing: how many batches to process simultaneously
@@ -50,11 +50,12 @@ const BATCH_DELAY_MS = 3000; // 3 seconds between batches (reduced for parallel 
  * - CPU: Moderate (single-threaded JS, but parallel processes)
  * 
  * Recommended values:
- * - 3: Best speed, requires 1-2 GB RAM, 2 vCPU (Vercel Pro, Railway)
- * - 2: Good balance, requires 600-800 MB RAM, 1-2 vCPU (Railway, Render)
+ * - 5: Maximum speed (50 domains simultaneously), requires 2-3 GB RAM, 2-4 vCPU (Railway, Vercel Pro)
+ * - 3: Good balance, requires 1-2 GB RAM, 2 vCPU (Vercel Pro, Railway)
+ * - 2: Conservative, requires 600-800 MB RAM, 1-2 vCPU (Railway, Render)
  * - 1: Sequential (slowest), requires 300-400 MB RAM, 1 vCPU (Free tiers)
  */
-const PARALLEL_BATCHES = 3; // Process 3 batches at a time (30 domains simultaneously)
+const PARALLEL_BATCHES = 5; // Process 5 batches at a time (50 domains simultaneously) - optimized for speed
 
 /**
  * Sleep utility for rate limiting
