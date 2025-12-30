@@ -149,6 +149,7 @@ export async function scrapeTrafficData(
           avgSessionDurationSeconds: null,
           bounceRate: null,
           pagesPerVisit: null,
+          growthRate: null,
           checkedAt: null,
           error: 'Domain not found in results',
         });
@@ -175,6 +176,7 @@ export async function scrapeTrafficData(
           avgSessionDurationSeconds: null,
           bounceRate: null,
           pagesPerVisit: null,
+          growthRate: null,
           checkedAt: null,
           error: 'Domain not found in results',
         });
@@ -201,6 +203,7 @@ export async function scrapeTrafficData(
       avgSessionDurationSeconds: null,
       bounceRate: null,
       pagesPerVisit: null,
+      growthRate: null,
       checkedAt: null,
       error: errorMsg,
     }));
@@ -214,6 +217,7 @@ export async function scrapeTrafficData(
       avgSessionDurationSeconds: null,
       bounceRate: null,
       pagesPerVisit: null,
+      growthRate: null,
       checkedAt: null,
       error: error instanceof Error ? error.message : 'Unknown error',
     }));
@@ -419,6 +423,7 @@ async function extractFromTable(page: Page, domains: string[]): Promise<TrafficD
           avgSessionDurationSeconds,
           bounceRate,
           pagesPerVisit,
+          growthRate: null, // Will be calculated from historical data
           checkedAt: null,
           error: null,
         });
@@ -724,6 +729,7 @@ async function extractFromCards(page: Page, domains: string[]): Promise<TrafficD
             avgSessionDurationSeconds,
             bounceRate,
             pagesPerVisit,
+            growthRate: null, // Will be calculated from historical data
             checkedAt: null,
             error: null,
           });
@@ -787,6 +793,7 @@ async function extractGeneric(page: Page, domains: string[]): Promise<TrafficDat
           avgSessionDurationSeconds,
           bounceRate,
           pagesPerVisit: null,
+          growthRate: null, // Will be calculated from historical data
           checkedAt: null,
           error: null,
         });
@@ -815,6 +822,7 @@ function generateMockData(domains: string[]): TrafficData[] {
       monthlyVisits: Math.round(visits),
       avgSessionDuration: `${durationMinutes}m ${durationSeconds}s`,
       avgSessionDurationSeconds: durationMinutes * 60 + durationSeconds,
+      growthRate: null, // Will be calculated from historical data
       bounceRate: Math.round((Math.random() * 40 + 30) * 10) / 10,
       pagesPerVisit: Math.round((Math.random() * 3 + 2) * 10) / 10,
       checkedAt: null,

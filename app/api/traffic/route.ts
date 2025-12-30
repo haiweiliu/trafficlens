@@ -13,7 +13,8 @@ import {
   storeTrafficData, 
   isDataFresh,
   getHistoricalData,
-  calculateTrends 
+  calculateTrends,
+  calculateGrowthRateBatch
 } from '@/lib/db';
 
 export const maxDuration = 300; // 5 minutes for Vercel
@@ -150,7 +151,7 @@ export async function POST(request: NextRequest) {
       for (const [domain, data] of memoryCached.entries()) {
         if (!cached.has(domain)) {
           // Ensure avgSessionDuration is formatted if we have seconds
-          const formattedData = { ...data };
+          const formattedData: TrafficData = { ...data, growthRate: (data as any).growthRate ?? null };
           if (!formattedData.avgSessionDuration && formattedData.avgSessionDurationSeconds !== null) {
             // Convert seconds to formatted string (HH:MM:SS)
             const seconds = formattedData.avgSessionDurationSeconds;
@@ -218,6 +219,7 @@ export async function POST(request: NextRequest) {
           avgSessionDurationSeconds: null,
           bounceRate: null,
           pagesPerVisit: null,
+          growthRate: null,
           checkedAt: timestamp,
           error: 'Domain not found in scraping results',
         }));
@@ -238,6 +240,7 @@ export async function POST(request: NextRequest) {
           avgSessionDurationSeconds: null,
           bounceRate: null,
           pagesPerVisit: null,
+          growthRate: null,
           checkedAt: timestamp,
           error: errorMsg,
         }));
@@ -298,10 +301,15 @@ export async function POST(request: NextRequest) {
       return orderA - orderB;
     });
 
-    // Add timestamp to all results
+    // Calculate growth rates for all domains (from historical data)
+    const allDomains = allResults.map(r => r.domain);
+    const growthRates = calculateGrowthRateBatch(allDomains);
+
+    // Add timestamp and growth rate to all results
     const finalTimestamp = new Date().toISOString();
     const resultsWithTimestamp = allResults.map(result => ({
       ...result,
+      growthRate: growthRates.get(result.domain) ?? null,
       checkedAt: result.checkedAt || finalTimestamp,
     }));
 

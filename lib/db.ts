@@ -236,6 +236,7 @@ export function getLatestTrafficData(domain: string): TrafficData | null {
     avgSessionDurationSeconds: row.avg_session_duration_seconds,
     bounceRate: row.bounce_rate,
     pagesPerVisit: row.pages_per_visit,
+    growthRate: null, // Will be calculated separately when needed
     checkedAt: row.checked_at,
     error: null,
   };
@@ -262,6 +263,7 @@ export function getLatestTrafficDataBatch(domains: string[]): Map<string, Traffi
       avgSessionDurationSeconds: row.avg_session_duration_seconds,
       bounceRate: row.bounce_rate,
       pagesPerVisit: row.pages_per_visit,
+      growthRate: null, // Will be calculated separately when needed
       checkedAt: row.checked_at,
       error: null,
     });
@@ -368,6 +370,58 @@ export function getHistoricalData(
   `);
   
   return stmt.all(domain, months) as HistoricalData[];
+}
+
+/**
+ * Calculate growth rate (percentage change) from previous month
+ * Returns percentage as a number (e.g., 19.66 for +19.66%, -16.62 for -16.62%)
+ * Returns null if insufficient data
+ */
+export function calculateGrowthRate(domain: string): number | null {
+  const database = getDb();
+  // Get last 2 months of data to calculate growth
+  const stmt = database.prepare(`
+    SELECT month_year, monthly_visits
+    FROM traffic_snapshots
+    WHERE domain = ?
+    ORDER BY month_year DESC
+    LIMIT 2
+  `);
+  
+  const rows = stmt.all(domain) as Array<{ month_year: string; monthly_visits: number | null }>;
+  
+  if (rows.length < 2) {
+    return null; // Need at least 2 months of data
+  }
+  
+  const currentMonth = rows[0];
+  const previousMonth = rows[1];
+  
+  if (!currentMonth.monthly_visits || !previousMonth.monthly_visits) {
+    return null; // Missing data
+  }
+  
+  if (previousMonth.monthly_visits === 0) {
+    return null; // Can't calculate growth from zero
+  }
+  
+  // Calculate percentage change: ((current - previous) / previous) * 100
+  const growthRate = ((currentMonth.monthly_visits - previousMonth.monthly_visits) / previousMonth.monthly_visits) * 100;
+  
+  return Math.round(growthRate * 100) / 100; // Round to 2 decimal places
+}
+
+/**
+ * Calculate growth rate for multiple domains (batch)
+ */
+export function calculateGrowthRateBatch(domains: string[]): Map<string, number | null> {
+  const result = new Map<string, number | null>();
+  
+  for (const domain of domains) {
+    result.set(domain, calculateGrowthRate(domain));
+  }
+  
+  return result;
 }
 
 /**
