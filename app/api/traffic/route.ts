@@ -144,7 +144,8 @@ export async function POST(request: NextRequest) {
       // Filter to only fresh data based on SimilarWeb's update schedule
       cached = new Map<string, TrafficData>();
       for (const [domain, data] of dbCached.entries()) {
-        if (isDataFresh(domain, 30)) {
+        // Check if data is fresh (isDataFresh handles www. variations internally)
+        if (isDataFresh(data.domain || domain, 30)) {
           cached.set(domain, data);
         }
       }

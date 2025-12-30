@@ -298,28 +298,67 @@ export function getLatestTrafficData(domain: string): TrafficData | null {
 
 /**
  * Get traffic data for multiple domains (latest)
+ * Handles www. variations by checking both with and without www.
  */
 export function getLatestTrafficDataBatch(domains: string[]): Map<string, TrafficData> {
   const database = getDb();
-  const placeholders = domains.map(() => '?').join(',');
+  const result = new Map<string, TrafficData>();
+  
+  // Build query with both www. and non-www. variations
+  const allDomainVariations: string[] = [];
+  const domainVariationMap = new Map<string, string>(); // db domain variation -> original request domain
+  
+  for (const domain of domains) {
+    const normalized = domain.toLowerCase().trim();
+    const withoutWww = normalized.replace(/^www\./, '');
+    const withWww = `www.${withoutWww}`;
+    
+    // Map both variations to the original request domain
+    domainVariationMap.set(withoutWww, domain);
+    if (withWww !== withoutWww) {
+      domainVariationMap.set(withWww, domain);
+    }
+    
+    // Add both variations to query (avoid duplicates)
+    if (!allDomainVariations.includes(withoutWww)) {
+      allDomainVariations.push(withoutWww);
+    }
+    if (!allDomainVariations.includes(withWww) && withWww !== withoutWww) {
+      allDomainVariations.push(withWww);
+    }
+  }
+  
+  if (allDomainVariations.length === 0) {
+    return result;
+  }
+  
+  const placeholders = allDomainVariations.map(() => '?').join(',');
   const stmt = database.prepare(`
     SELECT * FROM traffic_latest WHERE domain IN (${placeholders})
   `);
   
-  const rows = stmt.all(...domains) as any[];
-  const result = new Map<string, TrafficData>();
+  const rows = stmt.all(...allDomainVariations) as any[];
   
+  // Map database results back to original request domains
   for (const row of rows) {
-    result.set(row.domain, {
-      domain: row.domain,
-      monthlyVisits: row.monthly_visits,
-      avgSessionDuration: formatDurationFromSeconds(row.avg_session_duration_seconds),
-      avgSessionDurationSeconds: row.avg_session_duration_seconds,
-      bounceRate: row.bounce_rate,
-      pagesPerVisit: row.pages_per_visit,
-      checkedAt: row.checked_at,
-      error: null,
-    });
+    const dbDomain = row.domain;
+    const originalRequestDomain = domainVariationMap.get(dbDomain);
+    
+    if (originalRequestDomain) {
+      // Only add if we haven't already added this domain (avoid duplicates)
+      if (!result.has(originalRequestDomain)) {
+        result.set(originalRequestDomain, {
+          domain: originalRequestDomain, // Use original request domain
+          monthlyVisits: row.monthly_visits,
+          avgSessionDuration: formatDurationFromSeconds(row.avg_session_duration_seconds),
+          avgSessionDurationSeconds: row.avg_session_duration_seconds,
+          bounceRate: row.bounce_rate,
+          pagesPerVisit: row.pages_per_visit,
+          checkedAt: row.checked_at,
+          error: null,
+        });
+      }
+    }
   }
   
   return result;
@@ -339,12 +378,19 @@ export function getLatestTrafficDataBatch(domains: string[]): Map<string, Traffi
  */
 export function isDataFresh(domain: string, maxAgeDays: number = 30): boolean {
   const database = getDb();
+  
+  // Normalize domain for lookup (check both www. and non-www. versions)
+  const normalized = domain.toLowerCase().trim();
+  const withoutWww = normalized.replace(/^www\./, '');
+  const withWww = `www.${withoutWww}`;
+  
+  // Try both variations
   const stmt = database.prepare(`
     SELECT checked_at, month_year FROM traffic_latest 
-    WHERE domain = ?
+    WHERE domain = ? OR domain = ?
   `);
   
-  const row = stmt.get(domain) as any;
+  const row = stmt.get(withoutWww, withWww) as any;
   if (!row) return false;
   
   const now = new Date();
