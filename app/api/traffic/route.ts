@@ -128,14 +128,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check database first (monthly cache - SimilarWeb updates monthly)
+    // Check database first (monthly cache - SimilarWeb updates by 10th of following month)
     let cached: Map<string, TrafficData>;
     if (bypassCache) {
       cached = new Map<string, TrafficData>();
     } else {
-      // Check database for fresh data (current month, checked within 30 days)
+      // Check database for fresh data
+      // SimilarWeb releases monthly data by the 10th of following month (+ 2-day buffer)
+      // Before 12th: Previous month's data is still valid
+      // On/after 12th: Current month's data should be available
       const dbCached = getLatestTrafficDataBatch(domains);
-      // Filter to only fresh data (current month)
+      // Filter to only fresh data based on SimilarWeb's update schedule
       cached = new Map<string, TrafficData>();
       for (const [domain, data] of dbCached.entries()) {
         if (isDataFresh(domain, 30)) {

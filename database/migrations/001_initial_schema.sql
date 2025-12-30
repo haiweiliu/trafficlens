@@ -73,5 +73,7 @@ CREATE TABLE IF NOT EXISTS data_metadata (
 INSERT OR IGNORE INTO data_metadata (key, value) VALUES 
     ('last_similarweb_update', '2025-01-01'),
     ('cache_ttl_days', '30'),
-    ('data_source', 'traffic.cv (SimilarWeb)');
+    ('data_source', 'traffic.cv (SimilarWeb)'),
+    ('update_cutoff_day', '12'),
+    ('update_cutoff_buffer_days', '2');
 

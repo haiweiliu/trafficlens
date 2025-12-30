@@ -101,7 +101,9 @@ function initializeSchema(database: Database.Database) {
     INSERT OR IGNORE INTO data_metadata (key, value) VALUES 
       ('last_similarweb_update', '2025-01-01'),
       ('cache_ttl_days', '30'),
-      ('data_source', 'traffic.cv (SimilarWeb)');
+      ('data_source', 'traffic.cv (SimilarWeb)'),
+      ('update_cutoff_day', '12'),
+      ('update_cutoff_buffer_days', '2');
   `;
   
   database.exec(schema);
@@ -113,6 +115,33 @@ function initializeSchema(database: Database.Database) {
 function getCurrentMonth(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/**
+ * Get the month that SimilarWeb data should represent based on current date
+ * 
+ * SimilarWeb releases monthly data by the 10th of the following month.
+ * - If today is before the 12th (10th + 2 day buffer): Previous month's data is latest
+ * - If today is on/after the 12th: Current month's data should be available
+ */
+export function getExpectedDataMonth(): string {
+  const now = new Date();
+  const currentDay = now.getDate();
+  const cutoffDay = 12; // 10th + 2 day buffer
+  
+  if (currentDay < cutoffDay) {
+    // Before the 12th: Previous month's data is still the latest
+    let year = now.getFullYear();
+    let month = now.getMonth(); // 0-indexed, so current month
+    if (month === 0) {
+      month = 12;
+      year = year - 1;
+    }
+    return `${year}-${String(month).padStart(2, '0')}`;
+  } else {
+    // On/after the 12th: Current month's data should be available
+    return getCurrentMonth();
+  }
 }
 
 /**
@@ -228,8 +257,16 @@ export function getLatestTrafficDataBatch(domains: string[]): Map<string, Traffi
 }
 
 /**
- * Check if data is fresh (within current month, checked recently)
- * SimilarWeb updates monthly, so we cache for the entire month
+ * Check if data is fresh based on SimilarWeb's update cadence
+ * 
+ * SimilarWeb Update Schedule:
+ * - Monthly data: Released by the 10th of the following month (sometimes sooner)
+ * - Daily data: Released within 72 hours after end of day (EST)
+ * 
+ * Strategy:
+ * - If today is before the 10th: Previous month's data is still valid (new data not released yet)
+ * - If today is on/after the 10th: Current month's data should be available
+ * - Add 2-day buffer for delays
  */
 export function isDataFresh(domain: string, maxAgeDays: number = 30): boolean {
   const database = getDb();
@@ -241,14 +278,55 @@ export function isDataFresh(domain: string, maxAgeDays: number = 30): boolean {
   const row = stmt.get(domain) as any;
   if (!row) return false;
   
+  const now = new Date();
   const currentMonth = getCurrentMonth();
-  // If data is from current month and checked within maxAgeDays, it's fresh
+  const currentDay = now.getDate();
+  const bufferDays = 2; // 2-day buffer for SimilarWeb delays
+  
+  // SimilarWeb releases monthly data by the 10th of following month
+  // So if we're before the 12th (10th + 2 day buffer), previous month's data is still valid
+  const cutoffDay = 10 + bufferDays; // 12th of the month
+  
+  // Parse the stored month_year
+  const [storedYear, storedMonth] = row.month_year.split('-').map(Number);
+  const [currentYear, currentMonthNum] = currentMonth.split('-').map(Number);
+  
+  // Calculate previous month
+  let prevYear = currentYear;
+  let prevMonth = currentMonthNum - 1;
+  if (prevMonth === 0) {
+    prevMonth = 12;
+    prevYear = currentYear - 1;
+  }
+  const previousMonth = `${prevYear}-${String(prevMonth).padStart(2, '0')}`;
+  
+  // Case 1: Data is from current month - always fresh if we're past the cutoff day
   if (row.month_year === currentMonth) {
-    const checkedAt = new Date(row.checked_at);
-    const ageDays = (Date.now() - checkedAt.getTime()) / (1000 * 60 * 60 * 24);
-    return ageDays <= maxAgeDays;
+    // If we're past the 12th, current month data should be available
+    if (currentDay >= cutoffDay) {
+      const checkedAt = new Date(row.checked_at);
+      const ageDays = (Date.now() - checkedAt.getTime()) / (1000 * 60 * 60 * 24);
+      // Data is fresh if checked within maxAgeDays
+      return ageDays <= maxAgeDays;
+    }
+    // If we're before the 12th, current month data is definitely fresh (just released)
+    return true;
   }
   
+  // Case 2: Data is from previous month - valid if we're before the cutoff day
+  if (row.month_year === previousMonth) {
+    // If we're before the 12th, previous month's data is still valid (new data not released yet)
+    if (currentDay < cutoffDay) {
+      const checkedAt = new Date(row.checked_at);
+      const ageDays = (Date.now() - checkedAt.getTime()) / (1000 * 60 * 60 * 24);
+      // Also check that data isn't too old (safety check)
+      return ageDays <= 45; // Previous month data can be up to ~45 days old
+    }
+    // If we're past the 12th, previous month data is stale (new data should be available)
+    return false;
+  }
+  
+  // Case 3: Data is from older months - stale
   return false;
 }
 

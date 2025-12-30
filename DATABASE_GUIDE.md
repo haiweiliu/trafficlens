@@ -41,10 +41,26 @@ Stores metadata like last SimilarWeb update date, cache TTL, etc.
 
 ## Caching Strategy
 
-### Current Month (Fresh Data)
-- **TTL**: 30 days (entire month)
-- **Logic**: If data is from current month and checked within 30 days → use cached
-- **Why**: SimilarWeb updates monthly, so data is valid for the whole month
+### Data Freshness Logic (Based on SimilarWeb Update Cadence)
+
+**SimilarWeb Update Schedule:**
+- **Monthly Data**: Released by the **10th of the following month** (sometimes sooner)
+- **Daily Data**: Released within **72 hours** after end of day (EST)
+
+**Our Caching Strategy:**
+- **Before the 12th of the month** (10th + 2-day buffer): Previous month's data is still valid (new data not released yet)
+- **On/after the 12th of the month**: Current month's data should be available
+- **Buffer**: 2-day buffer added to account for SimilarWeb delays
+
+**Examples:**
+- **January 5th**: December data is still fresh (new January data not released yet)
+- **January 12th**: January data should be available (released by 10th + buffer)
+- **January 15th**: January data should be available
+
+**Why this works:**
+- Prevents unnecessary scraping when new data isn't available yet
+- Accounts for SimilarWeb's release schedule
+- Adds buffer for delays
 
 ### Historical Data
 - **Stored**: Monthly snapshots indefinitely (or configurable retention)
