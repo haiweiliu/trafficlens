@@ -8,12 +8,14 @@ interface ExportButtonsProps {
 
 export default function ExportButtons({ results }: ExportButtonsProps) {
   const convertToTSV = (data: TrafficData[]): string => {
-    const header = 'Domain\tMonthlyVisits\tAvgSessionDuration\tCheckedAt';
+    const header = 'Domain\tMonthlyVisits\tAvgSessionDuration\tBounceRate\tPagesPerVisit\tCheckedAt';
     const rows = data.map((r) => {
       const visits = r.monthlyVisits !== null ? r.monthlyVisits.toString() : '';
       const duration = r.avgSessionDuration || '';
+      const bounceRate = r.bounceRate !== null ? r.bounceRate.toString() : '';
+      const pagesPerVisit = r.pagesPerVisit !== null ? r.pagesPerVisit.toString() : '';
       const checkedAt = r.checkedAt || '';
-      return `${r.domain}\t${visits}\t${duration}\t${checkedAt}`;
+      return `${r.domain}\t${visits}\t${duration}\t${bounceRate}\t${pagesPerVisit}\t${checkedAt}`;
     });
     return [header, ...rows].join('\n');
   };

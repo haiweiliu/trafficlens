@@ -254,12 +254,14 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Add cached results
-    const cacheTimestamp = new Date().toISOString();
+    // Add cached results (preserve original checkedAt from database)
+    // The checkedAt shows when data was originally scraped (could be up to 30 days ago)
     for (const [domain, data] of cached.entries()) {
       allResults.push({
         ...data,
-        checkedAt: data.checkedAt || cacheTimestamp,
+        // Preserve original checkedAt from database (when data was scraped)
+        // This is correct - it shows the last scrape time, not current time
+        checkedAt: data.checkedAt,
       });
     }
 
