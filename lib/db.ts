@@ -159,11 +159,13 @@ export function getExpectedDataMonth(): string {
 }
 
 /**
- * Store traffic data for current month
+ * Store traffic data for a specific month
  */
-export function storeTrafficData(data: TrafficData): void {
+export function storeTrafficDataForMonth(
+  data: TrafficData,
+  monthYear: string
+): void {
   const database = getDb();
-  const monthYear = getCurrentMonth();
   
   // Insert or update snapshot
   const stmt = database.prepare(`
@@ -189,8 +191,17 @@ export function storeTrafficData(data: TrafficData): void {
     data.pagesPerVisit,
     data.checkedAt || new Date().toISOString()
   );
+}
+
+/**
+ * Store traffic data for current month (backward compatibility)
+ */
+export function storeTrafficData(data: TrafficData): void {
+  const monthYear = getCurrentMonth();
+  storeTrafficDataForMonth(data, monthYear);
   
   // Update latest cache
+  const database = getDb();
   const latestStmt = database.prepare(`
     INSERT INTO traffic_latest (
       domain, monthly_visits, avg_session_duration_seconds,
@@ -215,6 +226,50 @@ export function storeTrafficData(data: TrafficData): void {
     data.checkedAt || new Date().toISOString(),
     monthYear
   );
+}
+
+/**
+ * Store multiple months of traffic data (for historical data from graph)
+ */
+export interface MonthlyTrafficData {
+  monthYear: string; // Format: "YYYY-MM"
+  monthlyVisits: number | null;
+}
+
+export function storeHistoricalTrafficData(
+  domain: string,
+  monthlyData: MonthlyTrafficData[],
+  currentData: TrafficData // Current month's full data (with duration, bounce rate, etc.)
+): void {
+  const database = getDb();
+  const checkedAt = currentData.checkedAt || new Date().toISOString();
+  
+  // Store each month's visit data
+  const stmt = database.prepare(`
+    INSERT INTO traffic_snapshots (
+      domain, month_year, monthly_visits, avg_session_duration_seconds,
+      bounce_rate, pages_per_visit, checked_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(domain, month_year) DO UPDATE SET
+      monthly_visits = excluded.monthly_visits,
+      checked_at = excluded.checked_at,
+      updated_at = CURRENT_TIMESTAMP
+  `);
+  
+  for (const monthData of monthlyData) {
+    // For historical months, we only have visits data
+    // Use current month's metrics (duration, bounce rate, etc.) as fallback
+    // This is reasonable since these metrics don't change dramatically month-to-month
+    stmt.run(
+      domain,
+      monthData.monthYear,
+      monthData.monthlyVisits,
+      currentData.avgSessionDurationSeconds, // Use current month's duration
+      currentData.bounceRate, // Use current month's bounce rate
+      currentData.pagesPerVisit, // Use current month's pages per visit
+      checkedAt
+    );
+  }
 }
 
 /**

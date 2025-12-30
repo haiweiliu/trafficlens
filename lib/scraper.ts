@@ -5,6 +5,7 @@
 import { chromium, Browser, Page } from 'playwright';
 import { parseNumberWithSuffix, parseDurationToSeconds, parsePercentage } from './parsing-utils';
 import { TrafficData } from '@/types';
+import { extractHistoricalMonths, HistoricalMonthData } from './historical-extractor';
 
 /**
  * Scrapes traffic data from Traffic.cv bulk endpoint
@@ -712,6 +713,14 @@ async function extractFromCards(page: Page, domains: string[]): Promise<TrafficD
 
         // Only add result if we found at least the domain and one metric
         if (domain && (monthlyVisits !== null || avgSessionDuration !== null)) {
+          // Extract historical months data from the "Visits Over Time" graph
+          let historicalMonths: HistoricalMonthData[] = [];
+          try {
+            historicalMonths = await extractHistoricalMonths(page, domain);
+          } catch (error) {
+            console.error(`Error extracting historical months for ${domain}:`, error);
+          }
+
           results.push({
             domain,
             monthlyVisits,
@@ -722,7 +731,9 @@ async function extractFromCards(page: Page, domains: string[]): Promise<TrafficD
             growthRate: null, // Will be calculated from historical data
             checkedAt: null,
             error: null,
-          });
+            // Store historical months data for later storage
+            historicalMonths: historicalMonths.length > 0 ? historicalMonths : undefined,
+          } as TrafficData & { historicalMonths?: HistoricalMonthData[] });
         }
       } catch (e) {
         // Skip this card if extraction fails

@@ -10,7 +10,8 @@ import { TrafficData } from '@/types';
 import { trafficCache } from '@/lib/cache';
 import { 
   getLatestTrafficDataBatch, 
-  storeTrafficData, 
+  storeTrafficData,
+  storeHistoricalTrafficData,
   isDataFresh,
   getHistoricalData,
   calculateTrends,
@@ -197,8 +198,18 @@ export async function POST(request: NextRequest) {
               checkedAt: result.checkedAt || new Date().toISOString(),
             };
             
-            // Store in database (monthly snapshot)
+            // Store current month's data in database
             storeTrafficData(resultWithTimestamp);
+            
+            // Store historical months data if available (from "Visits Over Time" graph)
+            const historicalMonths = (result as any).historicalMonths;
+            if (historicalMonths && Array.isArray(historicalMonths) && historicalMonths.length > 0) {
+              storeHistoricalTrafficData(
+                result.domain,
+                historicalMonths,
+                resultWithTimestamp
+              );
+            }
             
             // Also keep in-memory cache for quick access
             trafficCache.set(result.domain, resultWithTimestamp);
