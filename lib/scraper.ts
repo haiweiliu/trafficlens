@@ -105,13 +105,33 @@ export async function scrapeTrafficData(
       }
     }
 
-    // Wait for data to render - balance between speed and reliability
+    // Wait for data to render - Railway needs more time than localhost
+    // Detect Railway by checking for Railway-specific environment variables
+    const isRailway = !!(
+      process.env.RAILWAY_ENVIRONMENT || 
+      process.env.RAILWAY_ENVIRONMENT_NAME || 
+      process.env.RAILWAY_SERVICE_NAME ||
+      process.env.RAILWAY_PROJECT_ID
+    );
+    const baseWaitTime = isRailway ? 6000 : 3000; // Railway needs 6s, localhost 3s
+    
     if (resultsFound) {
-      // Wait for data to fully render (3s ensures data is loaded)
-      await page.waitForTimeout(3000);
+      // Wait for data to fully render
+      await page.waitForTimeout(baseWaitTime);
       
       // Additional check: Verify cards/table have actual content with metrics
+      // Wait for expected domains to appear (more strict for Railway)
       try {
+        const verificationTimeout = isRailway ? 15000 : 5000; // Railway: 15s, localhost: 5s
+        const expectedCount = domains.length;
+        const isRailwayEnv = isRailway;
+        
+        // Inject values into page context for the waitForFunction
+        await page.evaluate(({ expectedCount, isRailwayEnv }) => {
+          (window as any).__expectedCount = expectedCount;
+          (window as any).__isRailwayEnv = isRailwayEnv;
+        }, { expectedCount, isRailwayEnv });
+        
         await page.waitForFunction(
           () => {
             const cards = document.querySelectorAll('[class*="card"], table tbody tr, [class*="result"]');
@@ -127,30 +147,49 @@ export async function scrapeTrafficData(
                 cardsWithData++;
               }
             }
-            // Need at least 2 cards with data to ensure page is fully loaded
-            return cardsWithData >= Math.min(2, cards.length);
+            // For Railway: wait for at least 80% of expected domains (minimum 2)
+            // For localhost: wait for at least 2 cards
+            const expectedCount = (window as any).__expectedCount || 10;
+            const isRailwayEnv = (window as any).__isRailwayEnv || false;
+            const minRequired = isRailwayEnv 
+              ? Math.max(2, Math.floor(expectedCount * 0.8)) 
+              : Math.min(2, cards.length);
+            return cardsWithData >= minRequired;
           },
-          { timeout: 5000 }
+          { timeout: verificationTimeout }
         ).catch(() => {
           // Continue even if this check times out - data might still be there
           console.log('Content verification timeout, proceeding anyway');
         });
+        
+        // Additional wait after verification to ensure all data is rendered
+        if (isRailway) {
+          await page.waitForTimeout(3000); // Extra 3s for Railway
+        }
       } catch (e) {
         // Continue if check fails
         console.log('Content verification failed, proceeding anyway');
       }
     } else {
       // Give more time if no selector found
-      await page.waitForTimeout(5000);
+      await page.waitForTimeout(isRailway ? 10000 : 5000);
     }
 
     // Minimal debug logging for performance
     console.log(`Page loaded: ${url}`);
 
     // Try to find results in table format first (most common)
-    const tableResults = await extractFromTable(page, domains);
+    let tableResults = await extractFromTable(page, domains);
     if (tableResults.length > 0) {
       console.log(`Extracted ${tableResults.length} results from table (expected ${domains.length} domains)`);
+      
+      // If Railway and missing many domains, wait more and retry
+      if (isRailway && tableResults.length < domains.length * 0.8) {
+        console.log(`Railway: Only found ${tableResults.length}/${domains.length} domains, waiting longer and retrying...`);
+        await page.waitForTimeout(5000); // Extra 5s wait
+        tableResults = await extractFromTable(page, domains);
+        console.log(`After retry: Extracted ${tableResults.length} results from table`);
+      }
       
       // Ensure all domains have results (fill missing ones with errors)
       const foundDomains = new Set(tableResults.map(r => r.domain.toLowerCase().replace(/^www\./, '')));
@@ -181,14 +220,26 @@ export async function scrapeTrafficData(
     }
 
     // Fallback to card format
-    const cardResults = await extractFromCards(page, domains);
+    let cardResults = await extractFromCards(page, domains);
     if (cardResults.length > 0) {
+      // If Railway and missing many domains, wait more and retry
+      if (isRailway && cardResults.length < domains.length * 0.8) {
+        console.log(`Railway: Only found ${cardResults.length}/${domains.length} domains in cards, waiting longer and retrying...`);
+        await page.waitForTimeout(5000); // Extra 5s wait
+        cardResults = await extractFromCards(page, domains);
+        console.log(`After retry: Extracted ${cardResults.length} results from cards`);
+      }
+      
       // Ensure all domains have results
       const foundDomains = new Set(cardResults.map(r => r.domain.toLowerCase().replace(/^www\./, '')));
       const missingDomains = domains.filter(d => {
         const dNorm = d.toLowerCase().replace(/^www\./, '');
         return !foundDomains.has(dNorm);
       });
+      
+      if (missingDomains.length > 0) {
+        console.log(`Missing ${missingDomains.length} domains in cards: ${missingDomains.join(', ')}`);
+      }
       
       for (const domain of missingDomains) {
         cardResults.push({
