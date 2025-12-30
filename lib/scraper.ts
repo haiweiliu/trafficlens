@@ -237,7 +237,6 @@ export async function scrapeTrafficData(
       avgSessionDurationSeconds: null,
       bounceRate: null,
       pagesPerVisit: null,
-      growthRate: null,
       checkedAt: null,
       error: error instanceof Error ? error.message : 'Unknown error',
     }));
@@ -622,9 +621,6 @@ async function extractFromCards(page: Page, domains: string[]): Promise<TrafficD
             }
           }
         }
-
-        // Growth Rate extraction removed - feature not reliable
-        const growthRate: number | null = null;
 
         // Extract "Avg. Duration" - format is "00:14:24" or "00:00:16" (HH:MM:SS)
         let avgSessionDuration: string | null = null;
