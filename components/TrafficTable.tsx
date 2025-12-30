@@ -7,14 +7,19 @@ interface TrafficTableProps {
   results: TrafficData[];
 }
 
-type SortField = 'domain' | 'monthlyVisits' | 'avgSessionDuration' | 'checkedAt';
+type SortField = 'original' | 'domain' | 'monthlyVisits' | 'avgSessionDuration' | 'checkedAt';
 type SortDirection = 'asc' | 'desc';
 
 export default function TrafficTable({ results }: TrafficTableProps) {
-  const [sortField, setSortField] = useState<SortField>('monthlyVisits');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [sortField, setSortField] = useState<SortField>('original');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
   const sortedResults = useMemo(() => {
+    // If sorting by 'original', preserve the order from API (no sorting)
+    if (sortField === 'original') {
+      return results;
+    }
+
     const sorted = [...results].sort((a, b) => {
       let aVal: any = a[sortField];
       let bVal: any = b[sortField];
@@ -63,11 +68,32 @@ export default function TrafficTable({ results }: TrafficTableProps) {
     if (sortField !== field) {
       return <span className="text-gray-400">↕</span>;
     }
+    if (field === 'original') {
+      return <span className="text-blue-600" title="Original order">●</span>;
+    }
     return sortDirection === 'asc' ? <span>↑</span> : <span>↓</span>;
+  };
+
+  const resetToOriginalOrder = () => {
+    setSortField('original');
+    setSortDirection('asc');
   };
 
   return (
     <div className="overflow-x-auto">
+      <div className="mb-3 flex justify-end">
+        <button
+          onClick={resetToOriginalOrder}
+          className={`px-3 py-1 text-sm rounded-md transition-colors ${
+            sortField === 'original'
+              ? 'bg-blue-600 text-white'
+              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+          }`}
+          title="Reset to original input order"
+        >
+          {sortField === 'original' ? '✓ Original Order' : 'Reset to Original Order'}
+        </button>
+      </div>
       <table className="min-w-full divide-y divide-gray-200">
         <thead className="bg-gray-50">
           <tr>
