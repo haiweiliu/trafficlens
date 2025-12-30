@@ -3,14 +3,15 @@
  */
 
 /**
- * Parses a number string with K/M suffixes to integer
- * Examples: "12.3K" -> 12300, "4.5M" -> 4500000
+ * Parses a number string with K/M/B suffixes to integer
+ * Examples: "12.3K" -> 12300, "4.5M" -> 4500000, "82.28B" -> 82280000000
  */
 export function parseNumberWithSuffix(value: string | null | undefined): number | null {
   if (!value) return null;
   
   const cleaned = value.trim().replace(/,/g, '');
-  const match = cleaned.match(/^([\d.]+)\s*([KMkm]?)$/);
+  // Match K, M, or B suffix (case insensitive)
+  const match = cleaned.match(/^([\d.]+)\s*([KMkmBb]?)$/);
   
   if (!match) {
     // Try to parse as plain number
@@ -26,6 +27,7 @@ export function parseNumberWithSuffix(value: string | null | undefined): number 
   let multiplier = 1;
   if (suffix === 'K') multiplier = 1000;
   if (suffix === 'M') multiplier = 1000000;
+  if (suffix === 'B') multiplier = 1000000000; // Billion
   
   return Math.round(num * multiplier);
 }
