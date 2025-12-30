@@ -15,7 +15,8 @@ import {
   isDataFresh,
   getHistoricalData,
   calculateTrends,
-  calculateGrowthRateBatch
+  calculateGrowthRateBatch,
+  getCurrentMonth
 } from '@/lib/db';
 
 export const maxDuration = 300; // 5 minutes for Vercel
@@ -192,9 +193,31 @@ export async function POST(request: NextRequest) {
         // Store results in database and in-memory cache
         for (const result of batchResults) {
           if (!result.error) {
+            // Calculate growth rate from historical months if available
+            let growthRate: number | null = null;
+            const historicalMonths = (result as any).historicalMonths;
+            
+            if (historicalMonths && Array.isArray(historicalMonths) && historicalMonths.length > 0) {
+              // Sort by month (most recent first)
+              const sortedMonths = [...historicalMonths].sort((a, b) => 
+                b.monthYear.localeCompare(a.monthYear)
+              );
+              
+              // Current month's visits
+              const currentVisits = result.monthlyVisits;
+              // Previous month's visits (from historical data)
+              const previousMonth = sortedMonths.find(m => m.monthYear !== getCurrentMonth());
+              
+              if (currentVisits && previousMonth?.monthlyVisits && previousMonth.monthlyVisits > 0) {
+                // Calculate growth: ((current - previous) / previous) * 100
+                growthRate = ((currentVisits - previousMonth.monthlyVisits) / previousMonth.monthlyVisits) * 100;
+                growthRate = Math.round(growthRate * 100) / 100; // Round to 2 decimal places
+              }
+            }
+            
             const resultWithTimestamp: TrafficData = {
               ...result,
-              growthRate: (result as any).growthRate ?? null,
+              growthRate: growthRate,
               checkedAt: result.checkedAt || new Date().toISOString(),
             };
             
@@ -202,7 +225,6 @@ export async function POST(request: NextRequest) {
             storeTrafficData(resultWithTimestamp);
             
             // Store historical months data if available (from "Visits Over Time" graph)
-            const historicalMonths = (result as any).historicalMonths;
             if (historicalMonths && Array.isArray(historicalMonths) && historicalMonths.length > 0) {
               storeHistoricalTrafficData(
                 result.domain,
