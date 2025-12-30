@@ -202,50 +202,55 @@ export async function POST(request: NextRequest) {
             
             console.log(`[${result.domain}] Growth rate from scraper: ${growthRate}, monthlyVisits: ${currentVisits}`);
             
-            // Only calculate if extraction completely failed (null)
-            // Never override a non-null extracted value
-            if (growthRate === null && historicalMonths && Array.isArray(historicalMonths) && historicalMonths.length > 0 && currentVisits) {
-              console.log(`[${result.domain}] Growth not extracted from UI, attempting calculation from historical data...`);
+            // IMPORTANT: Only calculate if extraction completely failed (null)
+            // Never override a non-null extracted value - traffic.cv's displayed value is authoritative
+            if (growthRate === null) {
+              console.log(`[${result.domain}] ⚠ Growth rate extraction failed - attempting calculation from historical data as fallback...`);
               
-              // Add current month to the list if not present
-              const allMonths = [...historicalMonths];
-              if (!allMonths.find(m => m.monthYear === currentMonth)) {
-                allMonths.push({ monthYear: currentMonth, monthlyVisits: currentVisits });
-              }
-              
-              // Sort by month (most recent first)
-              const sortedMonths = allMonths.sort((a, b) => 
-                b.monthYear.localeCompare(a.monthYear)
-              );
-              
-              console.log(`[${result.domain}] Sorted months:`, sortedMonths.map(m => `${m.monthYear}=${m.monthlyVisits}`).join(', '));
-              
-              // Find current month index
-              const currentIndex = sortedMonths.findIndex(m => m.monthYear === currentMonth);
-              
-              // Get previous month (the one before current in sorted list)
-              if (currentIndex > 0) {
-                const previousMonth = sortedMonths[currentIndex - 1];
+              // Only calculate if we have historical data
+              if (historicalMonths && Array.isArray(historicalMonths) && historicalMonths.length > 0 && currentVisits) {
+                // Add current month to the list if not present
+                const allMonths = [...historicalMonths];
+                if (!allMonths.find(m => m.monthYear === currentMonth)) {
+                  allMonths.push({ monthYear: currentMonth, monthlyVisits: currentVisits });
+                }
                 
-                if (previousMonth?.monthlyVisits && previousMonth.monthlyVisits > 0) {
-                  // Calculate growth: ((current - previous) / previous) * 100
-                  growthRate = ((currentVisits - previousMonth.monthlyVisits) / previousMonth.monthlyVisits) * 100;
-                  growthRate = Math.round(growthRate * 100) / 100; // Round to 2 decimal places
-                  console.log(`[${result.domain}] Calculated growth from historical: ${growthRate}% (current=${currentVisits}, previous=${previousMonth.monthlyVisits})`);
+                // Sort by month (most recent first)
+                const sortedMonths = allMonths.sort((a, b) => 
+                  b.monthYear.localeCompare(a.monthYear)
+                );
+                
+                console.log(`[${result.domain}] Sorted months for calculation:`, sortedMonths.map(m => `${m.monthYear}=${m.monthlyVisits}`).join(', '));
+                
+                // Find current month index
+                const currentIndex = sortedMonths.findIndex(m => m.monthYear === currentMonth);
+                
+                // Get previous month (the one before current in sorted list)
+                if (currentIndex > 0) {
+                  const previousMonth = sortedMonths[currentIndex - 1];
+                  
+                  if (previousMonth?.monthlyVisits && previousMonth.monthlyVisits > 0) {
+                    // Calculate growth: ((current - previous) / previous) * 100
+                    const calculated = ((currentVisits - previousMonth.monthlyVisits) / previousMonth.monthlyVisits) * 100;
+                    growthRate = Math.round(calculated * 100) / 100; // Round to 2 decimal places
+                    console.log(`[${result.domain}] ⚠ Calculated growth from historical: ${growthRate}% (current=${currentVisits}, previous=${previousMonth.monthlyVisits})`);
+                    console.log(`[${result.domain}] ⚠ WARNING: This is calculated, not extracted from traffic.cv UI - may be inaccurate!`);
+                  }
+                } else if (sortedMonths.length >= 2) {
+                  // If current month is first, compare with second (previous month)
+                  const previousMonth = sortedMonths[1];
+                  if (previousMonth?.monthlyVisits && previousMonth.monthlyVisits > 0) {
+                    const calculated = ((currentVisits - previousMonth.monthlyVisits) / previousMonth.monthlyVisits) * 100;
+                    growthRate = Math.round(calculated * 100) / 100;
+                    console.log(`[${result.domain}] ⚠ Calculated growth (fallback): ${growthRate}%`);
+                    console.log(`[${result.domain}] ⚠ WARNING: This is calculated, not extracted from traffic.cv UI - may be inaccurate!`);
+                  }
                 }
-              } else if (sortedMonths.length >= 2) {
-                // If current month is first, compare with second (previous month)
-                const previousMonth = sortedMonths[1];
-                if (previousMonth?.monthlyVisits && previousMonth.monthlyVisits > 0) {
-                  growthRate = ((currentVisits - previousMonth.monthlyVisits) / previousMonth.monthlyVisits) * 100;
-                  growthRate = Math.round(growthRate * 100) / 100;
-                  console.log(`[${result.domain}] Calculated growth (fallback): ${growthRate}%`);
-                }
+              } else {
+                console.log(`[${result.domain}] ⚠ No growth rate available (extraction failed, no historical data for calculation)`);
               }
-            } else if (growthRate !== null) {
-              console.log(`[${result.domain}] ✓ Using extracted growth rate from traffic.cv UI: ${growthRate}%`);
             } else {
-              console.log(`[${result.domain}] ⚠ No growth rate available (extraction failed, no historical data)`);
+              console.log(`[${result.domain}] ✓ Using extracted growth rate from traffic.cv UI: ${growthRate}%`);
             }
             
             const resultWithTimestamp: TrafficData = {
