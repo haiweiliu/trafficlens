@@ -626,41 +626,88 @@ async function extractFromCards(page: Page, domains: string[]): Promise<TrafficD
 
         // Extract Growth Rate directly from traffic.cv UI
         // Format: "+19.66%" or "-39.36%" shown near "Total Visits"
+        // Use DOM-based extraction for better accuracy
         let growthRate: number | null = null;
-        const growthPatterns = [
-          /([+-]?\d+\.?\d*)\s*%/,  // Match +19.66% or -39.36%
-          /growth[:\s]+([+-]?\d+\.?\d*)\s*%/i,
-          /change[:\s]+([+-]?\d+\.?\d*)\s*%/i,
-        ];
         
-        // Look for growth rate near "Total Visits" (usually within 100 chars)
-        const totalVisitsIndex = cardText.toLowerCase().indexOf('total visits');
-        if (totalVisitsIndex !== -1) {
-          const context = cardText.substring(totalVisitsIndex, Math.min(cardText.length, totalVisitsIndex + 150));
-          for (const pattern of growthPatterns) {
-            const match = context.match(pattern);
-            if (match && match[1]) {
+        try {
+          // Method 1: Find "Total Visits" element and look for growth rate in same container
+          const cardHTML = await card.innerHTML();
+          const totalVisitsRegex = /Total\s+Visits[^<]*/i;
+          const totalVisitsMatch = cardHTML.match(totalVisitsRegex);
+          
+          if (totalVisitsMatch) {
+            const matchIndex = totalVisitsMatch.index || 0;
+            // Look in a window around "Total Visits" (500 chars before and after)
+            const start = Math.max(0, matchIndex - 500);
+            const end = Math.min(cardHTML.length, matchIndex + totalVisitsMatch[0].length + 500);
+            const contextHTML = cardHTML.substring(start, end);
+            
+            // Look for growth rate pattern: +XX.XX% or -XX.XX% (must have sign)
+            // Exclude if it's near "bounce" or other metrics
+            const growthMatches = contextHTML.matchAll(/([+-]\d+\.?\d*)\s*%/g);
+            for (const match of growthMatches) {
               const parsed = parseFloat(match[1]);
-              if (!isNaN(parsed) && Math.abs(parsed) <= 1000) { // Reasonable range: -1000% to +1000%
-                growthRate = parsed;
-                break;
+              if (!isNaN(parsed) && Math.abs(parsed) <= 1000) {
+                // Check context around the match to exclude bounce rate
+                const matchPos = (match.index || 0) + start;
+                const contextStart = Math.max(0, matchPos - 100);
+                const contextEnd = Math.min(cardHTML.length, matchPos + 100);
+                const contextAround = cardHTML.substring(contextStart, contextEnd).toLowerCase();
+                
+                // Skip if it's clearly bounce rate (near "bounce" and 0-100%)
+                const isNearBounce = contextAround.includes('bounce') && Math.abs(parsed) <= 100;
+                // Skip if it's near "duration", "pages", or other metrics
+                const isNearOtherMetric = (contextAround.includes('duration') || 
+                                          contextAround.includes('pages') || 
+                                          contextAround.includes('avg')) && 
+                                         Math.abs(parsed) <= 100;
+                
+                if (!isNearBounce && !isNearOtherMetric) {
+                  growthRate = parsed;
+                  console.log(`[${domain}] Extracted growth rate from HTML context: ${growthRate}%`);
+                  break;
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.log(`[${domain}] Error in HTML-based extraction:`, e);
+        }
+        
+        // Method 2: Text-based extraction (fallback)
+        if (growthRate === null) {
+          const totalVisitsIndex = cardText.toLowerCase().indexOf('total visits');
+          if (totalVisitsIndex !== -1) {
+            // Look in a wider context (300 chars after "Total Visits")
+            const context = cardText.substring(totalVisitsIndex, Math.min(cardText.length, totalVisitsIndex + 300));
+            
+            // Pattern: must have + or - sign, followed by digits and %
+            const growthPattern = /([+-]\d+\.?\d*)\s*%/g;
+            let match;
+            while ((match = growthPattern.exec(context)) !== null) {
+              const parsed = parseFloat(match[1]);
+              if (!isNaN(parsed) && Math.abs(parsed) <= 1000) {
+                // Check context to exclude bounce rate
+                const matchPos = match.index || 0;
+                const contextAround = context.substring(Math.max(0, matchPos - 50), Math.min(context.length, matchPos + 50)).toLowerCase();
+                const isNearBounce = contextAround.includes('bounce') && Math.abs(parsed) <= 100;
+                const isNearOtherMetric = (contextAround.includes('duration') || 
+                                          contextAround.includes('pages') || 
+                                          contextAround.includes('avg')) && 
+                                         Math.abs(parsed) <= 100;
+                
+                if (!isNearBounce && !isNearOtherMetric) {
+                  growthRate = parsed;
+                  console.log(`[${domain}] Extracted growth rate from text context: ${growthRate}%`);
+                  break;
+                }
               }
             }
           }
         }
         
-        // Fallback: search entire card for growth percentage
         if (growthRate === null) {
-          for (const pattern of growthPatterns) {
-            const match = cardText.match(pattern);
-            if (match && match[1]) {
-              const parsed = parseFloat(match[1]);
-              if (!isNaN(parsed) && Math.abs(parsed) <= 1000) {
-                growthRate = parsed;
-                break;
-              }
-            }
-          }
+          console.log(`[${domain}] Could not extract growth rate - will calculate from historical data`);
         }
 
         // Extract "Avg. Duration" - format is "00:14:24" or "00:00:16" (HH:MM:SS)

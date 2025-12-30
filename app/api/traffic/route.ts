@@ -194,15 +194,18 @@ export async function POST(request: NextRequest) {
         for (const result of batchResults) {
           if (!result.error) {
             // Use growth rate extracted directly from traffic.cv UI (most accurate)
-            // Fall back to calculation from historical data only if not extracted
+            // IMPORTANT: Never override extracted value with calculated value
             let growthRate: number | null = result.growthRate ?? null;
             const historicalMonths = (result as any).historicalMonths;
             const currentMonth = getCurrentMonth();
             const currentVisits = result.monthlyVisits;
             
-            // If growth rate wasn't extracted from UI, try calculating from historical data
+            console.log(`[${result.domain}] Growth rate from scraper: ${growthRate}, monthlyVisits: ${currentVisits}`);
+            
+            // Only calculate if extraction completely failed (null)
+            // Never override a non-null extracted value
             if (growthRate === null && historicalMonths && Array.isArray(historicalMonths) && historicalMonths.length > 0 && currentVisits) {
-              console.log(`Growth not extracted from UI for ${result.domain}, calculating from historical data...`);
+              console.log(`[${result.domain}] Growth not extracted from UI, attempting calculation from historical data...`);
               
               // Add current month to the list if not present
               const allMonths = [...historicalMonths];
@@ -215,7 +218,7 @@ export async function POST(request: NextRequest) {
                 b.monthYear.localeCompare(a.monthYear)
               );
               
-              console.log(`Sorted months for ${result.domain}:`, sortedMonths.map(m => `${m.monthYear}=${m.monthlyVisits}`).join(', '));
+              console.log(`[${result.domain}] Sorted months:`, sortedMonths.map(m => `${m.monthYear}=${m.monthlyVisits}`).join(', '));
               
               // Find current month index
               const currentIndex = sortedMonths.findIndex(m => m.monthYear === currentMonth);
@@ -228,7 +231,7 @@ export async function POST(request: NextRequest) {
                   // Calculate growth: ((current - previous) / previous) * 100
                   growthRate = ((currentVisits - previousMonth.monthlyVisits) / previousMonth.monthlyVisits) * 100;
                   growthRate = Math.round(growthRate * 100) / 100; // Round to 2 decimal places
-                  console.log(`Growth calculated from historical: ${result.domain} = ${growthRate}% (current=${currentVisits}, previous=${previousMonth.monthlyVisits})`);
+                  console.log(`[${result.domain}] Calculated growth from historical: ${growthRate}% (current=${currentVisits}, previous=${previousMonth.monthlyVisits})`);
                 }
               } else if (sortedMonths.length >= 2) {
                 // If current month is first, compare with second (previous month)
@@ -236,11 +239,13 @@ export async function POST(request: NextRequest) {
                 if (previousMonth?.monthlyVisits && previousMonth.monthlyVisits > 0) {
                   growthRate = ((currentVisits - previousMonth.monthlyVisits) / previousMonth.monthlyVisits) * 100;
                   growthRate = Math.round(growthRate * 100) / 100;
-                  console.log(`Growth calculated from historical (fallback): ${result.domain} = ${growthRate}%`);
+                  console.log(`[${result.domain}] Calculated growth (fallback): ${growthRate}%`);
                 }
               }
             } else if (growthRate !== null) {
-              console.log(`Using growth rate extracted from traffic.cv UI for ${result.domain}: ${growthRate}%`);
+              console.log(`[${result.domain}] ✓ Using extracted growth rate from traffic.cv UI: ${growthRate}%`);
+            } else {
+              console.log(`[${result.domain}] ⚠ No growth rate available (extraction failed, no historical data)`);
             }
             
             const resultWithTimestamp: TrafficData = {
