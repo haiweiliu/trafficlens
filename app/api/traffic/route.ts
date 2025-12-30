@@ -8,6 +8,13 @@ import { normalizeDomains, chunkArray } from '@/lib/domain-utils';
 import { scrapeTrafficData } from '@/lib/scraper';
 import { TrafficData } from '@/types';
 import { trafficCache } from '@/lib/cache';
+import { 
+  getLatestTrafficDataBatch, 
+  storeTrafficData, 
+  isDataFresh,
+  getHistoricalData,
+  calculateTrends 
+} from '@/lib/db';
 
 export const maxDuration = 300; // 5 minutes for Vercel
 
@@ -121,8 +128,29 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check cache first (unless bypassed)
-    const cached = bypassCache ? new Map<string, TrafficData>() : trafficCache.getBatch(domains);
+    // Check database first (monthly cache - SimilarWeb updates monthly)
+    let cached: Map<string, TrafficData>;
+    if (bypassCache) {
+      cached = new Map<string, TrafficData>();
+    } else {
+      // Check database for fresh data (current month, checked within 30 days)
+      const dbCached = getLatestTrafficDataBatch(domains);
+      // Filter to only fresh data (current month)
+      cached = new Map<string, TrafficData>();
+      for (const [domain, data] of dbCached.entries()) {
+        if (isDataFresh(domain, 30)) {
+          cached.set(domain, data);
+        }
+      }
+      // Fallback to in-memory cache for backward compatibility
+      const memoryCached = trafficCache.getBatch(domains);
+      for (const [domain, data] of memoryCached.entries()) {
+        if (!cached.has(domain)) {
+          cached.set(domain, data);
+        }
+      }
+    }
+    
     const cacheHits = cached.size;
     const cacheMisses = domains.filter(d => !cached.has(d));
 
@@ -146,13 +174,19 @@ export async function POST(request: NextRequest) {
           return !foundDomains.has(dNorm);
         });
 
-        // Cache the results
+        // Store results in database and in-memory cache
         for (const result of batchResults) {
           if (!result.error) {
-            trafficCache.set(result.domain, {
+            const resultWithTimestamp = {
               ...result,
               checkedAt: result.checkedAt || new Date().toISOString(),
-            });
+            };
+            
+            // Store in database (monthly snapshot)
+            storeTrafficData(resultWithTimestamp);
+            
+            // Also keep in-memory cache for quick access
+            trafficCache.set(result.domain, resultWithTimestamp);
           }
         }
 
