@@ -120,9 +120,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Normalize domains
+    // Normalize domains but preserve original order mapping
     const normalized = normalizeDomains(rawDomains);
     const domains = normalized.map(d => d.domain);
+    
+    // Create mapping: normalized domain -> original input order index
+    // Also create reverse mapping for www. variations
+    const domainOrderMap = new Map<string, number>(); // normalized domain -> original index
+    const originalDomainMap = new Map<string, string>(); // normalized domain -> original domain string
+    
+    normalized.forEach((item, index) => {
+      const normDomain = item.domain.toLowerCase().trim();
+      const withoutWww = normDomain.replace(/^www\./, '');
+      const withWww = `www.${withoutWww}`;
+      
+      // Map both www. and non-www. variations to the same original index
+      domainOrderMap.set(withoutWww, index);
+      domainOrderMap.set(withWww, index);
+      
+      // Store original domain for reference
+      originalDomainMap.set(withoutWww, item.original);
+      originalDomainMap.set(withWww, item.original);
+    });
 
     if (domains.length === 0) {
       return NextResponse.json(
@@ -308,11 +327,17 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Sort results to match original domain order
-    const domainOrder = new Map(domains.map((d, i) => [d, i]));
+    // Sort results to match original domain order (preserves Google Sheet/CSV order)
+    // Use normalized domain matching to handle www. variations
     allResults.sort((a, b) => {
-      const orderA = domainOrder.get(a.domain) ?? Infinity;
-      const orderB = domainOrder.get(b.domain) ?? Infinity;
+      // Normalize result domains for matching
+      const aNorm = a.domain.toLowerCase().trim().replace(/^www\./, '');
+      const bNorm = b.domain.toLowerCase().trim().replace(/^www\./, '');
+      
+      // Get original order index (handles www. variations)
+      const orderA = domainOrderMap.get(aNorm) ?? domainOrderMap.get(`www.${aNorm}`) ?? Infinity;
+      const orderB = domainOrderMap.get(bNorm) ?? domainOrderMap.get(`www.${bNorm}`) ?? Infinity;
+      
       return orderA - orderB;
     });
 
