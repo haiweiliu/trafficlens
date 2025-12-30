@@ -193,6 +193,7 @@ export async function POST(request: NextRequest) {
           if (!result.error) {
             const resultWithTimestamp = {
               ...result,
+              growthRate: result.growthRate ?? null,
               checkedAt: result.checkedAt || new Date().toISOString(),
             };
             
