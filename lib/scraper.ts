@@ -2,18 +2,8 @@
  * Playwright-based scraper for Traffic.cv bulk traffic checker
  */
 
-import { chromium as playwrightChromium, Browser, Page } from 'playwright-core';
+import { chromium, Browser, Page } from 'playwright';
 import { parseNumberWithSuffix, parseDurationToSeconds, parsePercentage } from './parsing-utils';
-
-// Dynamically import @sparticuz/chromium only on Vercel
-let chromium: any = null;
-if (process.env.VERCEL === '1') {
-  try {
-    chromium = require('@sparticuz/chromium');
-  } catch (e) {
-    console.warn('@sparticuz/chromium not available, using default Playwright');
-  }
-}
 
 export interface TrafficData {
   domain: string;

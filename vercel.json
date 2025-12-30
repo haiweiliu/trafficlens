@@ -1,8 +1,0 @@
-{
-  "functions": {
-    "app/api/traffic/route.ts": {
-      "maxDuration": 300
-    }
-  }
-}
-
