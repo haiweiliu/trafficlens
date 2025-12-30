@@ -207,8 +207,9 @@ export async function POST(request: NextRequest) {
 
         // Add timestamp to batch results
         const timestamp = new Date().toISOString();
-        const batchResultsWithTimestamp = batchResults.map(r => ({
+        const batchResultsWithTimestamp: TrafficData[] = batchResults.map(r => ({
           ...r,
+          growthRate: (r as any).growthRate ?? null,
           checkedAt: r.checkedAt || timestamp,
         }));
 
