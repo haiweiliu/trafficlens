@@ -3,6 +3,7 @@
  */
 
 import { chromium, Browser, Page } from 'playwright';
+import { execSync } from 'child_process';
 import { parseNumberWithSuffix, parseDurationToSeconds, parsePercentage } from './parsing-utils';
 
 export interface TrafficData {
@@ -56,9 +57,22 @@ export async function scrapeTrafficData(
   let browser: Browser | null = null;
 
   try {
+    // Ensure Playwright browsers are installed (for Vercel/serverless)
+    try {
+      // Try to install browsers if not present (silent fail if already installed)
+      execSync('npx playwright install chromium --with-deps', { 
+        stdio: 'ignore',
+        timeout: 60000 
+      });
+    } catch (e) {
+      // Browser might already be installed, continue
+      console.log('Browser installation check completed');
+    }
+
     // Configure Playwright for Vercel/serverless environments
     browser = await chromium.launch({
       headless: true,
+      executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
