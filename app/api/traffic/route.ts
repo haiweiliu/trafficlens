@@ -149,7 +149,17 @@ export async function POST(request: NextRequest) {
       const memoryCached = trafficCache.getBatch(domains);
       for (const [domain, data] of memoryCached.entries()) {
         if (!cached.has(domain)) {
-          cached.set(domain, data);
+          // Ensure avgSessionDuration is formatted if we have seconds
+          const formattedData = { ...data };
+          if (!formattedData.avgSessionDuration && formattedData.avgSessionDurationSeconds !== null) {
+            // Convert seconds to formatted string (HH:MM:SS)
+            const seconds = formattedData.avgSessionDurationSeconds;
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = seconds % 60;
+            formattedData.avgSessionDuration = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+          }
+          cached.set(domain, formattedData);
         }
       }
     }
@@ -260,8 +270,20 @@ export async function POST(request: NextRequest) {
     // Add cached results (preserve original checkedAt from database)
     // The checkedAt shows when data was originally scraped (could be up to 30 days ago)
     for (const [domain, data] of cached.entries()) {
+      // Ensure avgSessionDuration is formatted if we have seconds but no formatted string
+      let formattedDuration = data.avgSessionDuration;
+      if (!formattedDuration && data.avgSessionDurationSeconds !== null && data.avgSessionDurationSeconds !== undefined) {
+        // Convert seconds to formatted string (HH:MM:SS)
+        const seconds = data.avgSessionDurationSeconds;
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const secs = seconds % 60;
+        formattedDuration = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+      }
+      
       allResults.push({
         ...data,
+        avgSessionDuration: formattedDuration,
         // Preserve original checkedAt from database (when data was scraped)
         // This is correct - it shows the last scrape time, not current time
         checkedAt: data.checkedAt,
