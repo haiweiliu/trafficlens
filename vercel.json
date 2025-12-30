@@ -3,11 +3,6 @@
     "app/api/traffic/route.ts": {
       "maxDuration": 300
     }
-  },
-  "installCommand": "npm install",
-  "buildCommand": "npm run build",
-  "env": {
-    "PLAYWRIGHT_BROWSERS_PATH": "0"
   }
 }
 
