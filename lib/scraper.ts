@@ -2,8 +2,8 @@
  * Playwright-based scraper for Traffic.cv bulk traffic checker
  */
 
-import { chromium, Browser, Page } from 'playwright';
-import { execSync } from 'child_process';
+import { chromium as playwrightChromium, Browser, Page } from 'playwright-core';
+import chromium from '@sparticuz/chromium';
 import { parseNumberWithSuffix, parseDurationToSeconds, parsePercentage } from './parsing-utils';
 
 export interface TrafficData {
@@ -57,32 +57,36 @@ export async function scrapeTrafficData(
   let browser: Browser | null = null;
 
   try {
-    // Ensure Playwright browsers are installed (for Vercel/serverless)
-    try {
-      // Try to install browsers if not present (silent fail if already installed)
-      execSync('npx playwright install chromium --with-deps', { 
-        stdio: 'ignore',
-        timeout: 60000 
-      });
-    } catch (e) {
-      // Browser might already be installed, continue
-      console.log('Browser installation check completed');
-    }
+    // Use serverless-compatible Chromium for Vercel
+    // For local dev, use regular Playwright; for Vercel, use @sparticuz/chromium
+    const isVercel = process.env.VERCEL === '1';
+    
+    let executablePath: string | undefined;
+    let launchArgs: string[];
 
-    // Configure Playwright for Vercel/serverless environments
-    browser = await chromium.launch({
-      headless: true,
-      executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
-      args: [
+    if (isVercel) {
+      // Vercel/serverless: Use @sparticuz/chromium
+      executablePath = await chromium.executablePath();
+      launchArgs = chromium.args;
+    } else {
+      // Local dev: Use regular Playwright
+      executablePath = undefined;
+      launchArgs = [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-accelerated-2d-canvas',
         '--no-first-run',
         '--no-zygote',
-        '--single-process', // Important for serverless
+        '--single-process',
         '--disable-gpu',
-      ],
+      ];
+    }
+
+    browser = await playwrightChromium.launch({
+      headless: true,
+      executablePath,
+      args: launchArgs,
     });
 
     const context = await browser.newContext({
