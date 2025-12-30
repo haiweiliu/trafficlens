@@ -196,22 +196,40 @@ export async function POST(request: NextRequest) {
             // Calculate growth rate from historical months if available
             let growthRate: number | null = null;
             const historicalMonths = (result as any).historicalMonths;
+            const currentMonth = getCurrentMonth();
+            const currentVisits = result.monthlyVisits;
             
-            if (historicalMonths && Array.isArray(historicalMonths) && historicalMonths.length > 0) {
+            if (historicalMonths && Array.isArray(historicalMonths) && historicalMonths.length > 0 && currentVisits) {
+              // Add current month to the list if not present
+              const allMonths = [...historicalMonths];
+              if (!allMonths.find(m => m.monthYear === currentMonth)) {
+                allMonths.push({ monthYear: currentMonth, monthlyVisits: currentVisits });
+              }
+              
               // Sort by month (most recent first)
-              const sortedMonths = [...historicalMonths].sort((a, b) => 
+              const sortedMonths = allMonths.sort((a, b) => 
                 b.monthYear.localeCompare(a.monthYear)
               );
               
-              // Current month's visits
-              const currentVisits = result.monthlyVisits;
-              // Previous month's visits (from historical data)
-              const previousMonth = sortedMonths.find(m => m.monthYear !== getCurrentMonth());
+              // Find current month index
+              const currentIndex = sortedMonths.findIndex(m => m.monthYear === currentMonth);
               
-              if (currentVisits && previousMonth?.monthlyVisits && previousMonth.monthlyVisits > 0) {
-                // Calculate growth: ((current - previous) / previous) * 100
-                growthRate = ((currentVisits - previousMonth.monthlyVisits) / previousMonth.monthlyVisits) * 100;
-                growthRate = Math.round(growthRate * 100) / 100; // Round to 2 decimal places
+              // Get previous month (the one before current in sorted list)
+              if (currentIndex > 0) {
+                const previousMonth = sortedMonths[currentIndex - 1];
+                
+                if (previousMonth?.monthlyVisits && previousMonth.monthlyVisits > 0) {
+                  // Calculate growth: ((current - previous) / previous) * 100
+                  growthRate = ((currentVisits - previousMonth.monthlyVisits) / previousMonth.monthlyVisits) * 100;
+                  growthRate = Math.round(growthRate * 100) / 100; // Round to 2 decimal places
+                }
+              } else if (sortedMonths.length >= 2) {
+                // If current month is first, compare with second (previous month)
+                const previousMonth = sortedMonths[1];
+                if (previousMonth?.monthlyVisits && previousMonth.monthlyVisits > 0) {
+                  growthRate = ((currentVisits - previousMonth.monthlyVisits) / previousMonth.monthlyVisits) * 100;
+                  growthRate = Math.round(growthRate * 100) / 100;
+                }
               }
             }
             
@@ -233,8 +251,20 @@ export async function POST(request: NextRequest) {
               );
             }
             
+            // If growth rate still null, try calculating from database (might have previous month now)
+            if (resultWithTimestamp.growthRate === null) {
+              const dbGrowthRate = calculateGrowthRateBatch([result.domain]).get(result.domain);
+              if (dbGrowthRate !== null && dbGrowthRate !== undefined) {
+                resultWithTimestamp.growthRate = dbGrowthRate;
+              }
+            }
+            
             // Also keep in-memory cache for quick access
             trafficCache.set(result.domain, resultWithTimestamp);
+            
+            // Update the result object for the batch
+            result.growthRate = resultWithTimestamp.growthRate;
+            result.checkedAt = resultWithTimestamp.checkedAt;
           }
         }
 

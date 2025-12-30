@@ -68,19 +68,27 @@ export async function extractHistoricalMonths(
     }
 
     // Method 2: Extract from page text (look for tooltip patterns)
-    // Tooltips often show: "2025/09 visits: 576.19K"
+    // Tooltips often show: "2025/09 visits: 576.19K" or "2025/09\nvisits: 576.19K"
     const pageText = await page.textContent('body') || '';
-    const tooltipPattern = /(\d{4})\/(\d{2})\s+visits?[:\s]+([\d.,]+\s*[KMkmBb]?)/gi;
-    let match;
     
-    while ((match = tooltipPattern.exec(pageText)) !== null) {
-      const [_, year, month, visitsStr] = match;
-      const monthYear = `${year}-${month}`;
-      const visits = parseNumberWithSuffix(visitsStr);
-      if (visits) {
-        // Avoid duplicates
-        if (!results.find(r => r.monthYear === monthYear)) {
-          results.push({ monthYear, monthlyVisits: visits });
+    // More flexible pattern - handle various formats
+    const tooltipPatterns = [
+      /(\d{4})\/(\d{2})\s+visits?[:\s]+([\d.,]+\s*[KMkmBb]?)/gi,
+      /(\d{4})\/(\d{2})[:\s]*([\d.,]+\s*[KMkmBb]?)\s*visits?/gi,
+      /(\d{4})\/(\d{2})[^\d]*([\d.,]+\s*[KMkmBb]?)/gi, // More flexible - any separator
+    ];
+    
+    for (const pattern of tooltipPatterns) {
+      let match;
+      while ((match = pattern.exec(pageText)) !== null) {
+        const [_, year, month, visitsStr] = match;
+        const monthYear = `${year}-${month}`;
+        const visits = parseNumberWithSuffix(visitsStr);
+        if (visits && visits > 0) {
+          // Avoid duplicates
+          if (!results.find(r => r.monthYear === monthYear)) {
+            results.push({ monthYear, monthlyVisits: visits });
+          }
         }
       }
     }
