@@ -7,7 +7,7 @@ interface TrafficTableProps {
   results: TrafficData[];
 }
 
-type SortField = 'domain' | 'monthlyVisits' | 'avgSessionDuration' | 'growthRate' | 'checkedAt';
+type SortField = 'domain' | 'monthlyVisits' | 'avgSessionDuration' | 'checkedAt';
 type SortDirection = 'asc' | 'desc';
 
 export default function TrafficTable({ results }: TrafficTableProps) {
@@ -90,15 +90,6 @@ export default function TrafficTable({ results }: TrafficTableProps) {
               </div>
             </th>
             <th
-              onClick={() => handleSort('growthRate')}
-              className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-            >
-              <div className="flex items-center gap-1">
-                Growth/Decline
-                <SortIcon field="growthRate" />
-              </div>
-            </th>
-            <th
               onClick={() => handleSort('avgSessionDuration')}
               className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
             >
@@ -137,15 +128,6 @@ export default function TrafficTable({ results }: TrafficTableProps) {
                 {result.monthlyVisits !== null
                   ? formatNumber(result.monthlyVisits)
                   : 'N/A'}
-              </td>
-              <td className="px-6 py-4 whitespace-nowrap text-sm">
-                {result.growthRate !== null ? (
-                  <span className={result.growthRate >= 0 ? 'text-green-600 font-semibold' : 'text-red-600 font-semibold'}>
-                    {result.growthRate >= 0 ? '+' : ''}{result.growthRate.toFixed(2)}%
-                  </span>
-                ) : (
-                  <span className="text-gray-400">N/A</span>
-                )}
               </td>
               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                 {result.avgSessionDuration || 'N/A'}

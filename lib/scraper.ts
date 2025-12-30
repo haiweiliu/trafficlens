@@ -140,7 +140,6 @@ export async function scrapeTrafficData(
           avgSessionDurationSeconds: null,
           bounceRate: null,
           pagesPerVisit: null,
-          growthRate: null,
           checkedAt: null,
           error: 'Domain not found in results',
         });
@@ -167,7 +166,6 @@ export async function scrapeTrafficData(
           avgSessionDurationSeconds: null,
           bounceRate: null,
           pagesPerVisit: null,
-          growthRate: null,
           checkedAt: null,
           error: 'Domain not found in results',
         });
@@ -247,7 +245,7 @@ async function extractFromTable(page: Page, domains: string[]): Promise<TrafficD
 
     // Get table headers to understand column order
     const headerRow = await page.$('table thead tr, table tr:first-child');
-    let columnOrder: { visits?: number; duration?: number; pages?: number; bounce?: number; growth?: number } = {};
+    let columnOrder: { visits?: number; duration?: number; pages?: number; bounce?: number } = {};
     
     if (headerRow) {
       const headers = await headerRow.$$('th, td');
@@ -261,8 +259,6 @@ async function extractFromTable(page: Page, domains: string[]): Promise<TrafficD
           columnOrder.pages = i;
         } else if (headerText.includes('bounce')) {
           columnOrder.bounce = i;
-        } else if (headerText.includes('growth') || headerText.includes('decline') || headerText.includes('change')) {
-          columnOrder.growth = i;
         }
       }
     }
@@ -409,37 +405,6 @@ async function extractFromTable(page: Page, domains: string[]): Promise<TrafficD
           }
         }
 
-        // Extract growth rate (usually shown as +19.66% or -39.36%)
-        let growthRate: number | null = null;
-        const growthIndex = columnOrder.growth;
-        if (growthIndex !== undefined && cellTexts[growthIndex]) {
-          const growthText = cellTexts[growthIndex]!;
-          // Match +19.66% or -39.36% pattern
-          const growthMatch = growthText.match(/([+-]?\d+\.?\d*)\s*%/);
-          if (growthMatch && growthMatch[1]) {
-            const parsed = parseFloat(growthMatch[1]);
-            if (!isNaN(parsed) && Math.abs(parsed) <= 1000) {
-              growthRate = parsed;
-            }
-          }
-        }
-        // Fallback: search all cells for growth pattern
-        if (growthRate === null) {
-          for (const text of cellTexts) {
-            if (text) {
-              const growthMatch = text.match(/([+-]?\d+\.?\d*)\s*%/);
-              if (growthMatch && growthMatch[1]) {
-                const parsed = parseFloat(growthMatch[1]);
-                // Make sure it's not bounce rate (bounce rate is 0-100%, growth can be >100%)
-                if (!isNaN(parsed) && Math.abs(parsed) <= 1000 && (Math.abs(parsed) > 100 || text.includes('growth') || text.includes('change') || text.includes('decline'))) {
-                  growthRate = parsed;
-                  break;
-                }
-              }
-            }
-          }
-        }
-
         results.push({
           domain,
           monthlyVisits,
@@ -447,7 +412,6 @@ async function extractFromTable(page: Page, domains: string[]): Promise<TrafficD
           avgSessionDurationSeconds,
           bounceRate,
           pagesPerVisit,
-          growthRate: growthRate, // Use extracted growth rate from table
           checkedAt: null,
           error: null,
         });
@@ -624,212 +588,8 @@ async function extractFromCards(page: Page, domains: string[]): Promise<TrafficD
           }
         }
 
-        // Extract Growth Rate directly from traffic.cv UI
-        // STRATEGIC APPROACH: Multiple extraction methods in parallel, with deep debugging
-        let growthRate: number | null = null;
-        const extractionAttempts: string[] = [];
-        
-        try {
-          // Get the full card HTML and text for analysis
-          const cardHTML = await card.innerHTML();
-          const cardTextLower = cardText.toLowerCase();
-          
-          // ============================================
-          // APPROACH 1: Direct Element Selectors (Most Reliable)
-          // ============================================
-          try {
-            // Look for growth rate in common UI patterns:
-            // - Badge/span with class containing "growth", "change", "percent"
-            // - Element with text matching +XX.XX% or -XX.XX%
-            const growthSelectors = [
-              '[class*="growth"]',
-              '[class*="change"]',
-              '[class*="percent"]',
-              '[class*="badge"]',
-              'span:has-text("+")',
-              'span:has-text("-")',
-              'div:has-text("+")',
-              'div:has-text("-")',
-            ];
-            
-            for (const selector of growthSelectors) {
-              try {
-                const elements = await card.$$(selector);
-                for (const el of elements) {
-                  const text = await el.textContent();
-                  if (text) {
-                    const match = text.match(/([+-]\d+\.?\d*)\s*%/);
-                    if (match && match[1]) {
-                      const parsed = parseFloat(match[1]);
-                      if (!isNaN(parsed) && Math.abs(parsed) <= 1000) {
-                        // Check if it's near "Total Visits" in parent context
-                        const parentText = await el.evaluate((e: Element) => {
-                          let parent = e.parentElement;
-                          let text = '';
-                          for (let i = 0; i < 3 && parent; i++) {
-                            text += parent.textContent || '';
-                            parent = parent.parentElement;
-                          }
-                          return text;
-                        });
-                        
-                        if (parentText.toLowerCase().includes('total visits')) {
-                          growthRate = parsed;
-                          extractionAttempts.push(`✓ Method 1 (Selector ${selector}): ${growthRate}%`);
-                          break;
-                        }
-                      }
-                    }
-                  }
-                }
-                if (growthRate !== null) break;
-              } catch (e) {
-                // Continue to next selector
-              }
-            }
-          } catch (e) {
-            extractionAttempts.push(`✗ Method 1 failed: ${e}`);
-          }
-          
-          // ============================================
-          // APPROACH 2: HTML Context Search (Current Method)
-          // ============================================
-          if (growthRate === null) {
-            const totalVisitsIndex = cardTextLower.indexOf('total visits');
-            
-            if (totalVisitsIndex !== -1) {
-              // Search in HTML around "Total Visits"
-              const htmlContext = cardHTML.substring(
-                Math.max(0, totalVisitsIndex - 200),
-                Math.min(cardHTML.length, totalVisitsIndex + 500)
-              );
-              
-              const htmlGrowthMatches = htmlContext.matchAll(/([+-]\d+\.?\d*)\s*%/g);
-              for (const match of htmlGrowthMatches) {
-                const parsed = parseFloat(match[1]);
-                if (!isNaN(parsed) && Math.abs(parsed) <= 1000) {
-                  const matchPos = (match.index || 0) + Math.max(0, totalVisitsIndex - 200);
-                  const contextStart = Math.max(0, matchPos - 150);
-                  const contextEnd = Math.min(cardHTML.length, matchPos + 150);
-                  const contextAround = cardHTML.substring(contextStart, contextEnd).toLowerCase();
-                  
-                  const isNearOtherMetric = contextAround.includes('bounce') || 
-                                           contextAround.includes('duration') || 
-                                           contextAround.includes('pages') || 
-                                           contextAround.includes('avg.');
-                  
-                  if (!isNearOtherMetric) {
-                    growthRate = parsed;
-                    extractionAttempts.push(`✓ Method 2 (HTML context): ${growthRate}%`);
-                    break;
-                  }
-                }
-              }
-              
-              // Search in plain text
-              if (growthRate === null) {
-                const textContext = cardText.substring(
-                  totalVisitsIndex,
-                  Math.min(cardText.length, totalVisitsIndex + 300)
-                );
-                
-                const textGrowthMatch = textContext.match(/([+-]\d+\.?\d*)\s*%/);
-                if (textGrowthMatch && textGrowthMatch[1]) {
-                  const parsed = parseFloat(textGrowthMatch[1]);
-                  if (!isNaN(parsed) && Math.abs(parsed) <= 1000) {
-                    const matchIndex = textGrowthMatch.index || 0;
-                    const contextAround = textContext.substring(
-                      Math.max(0, matchIndex - 50),
-                      Math.min(textContext.length, matchIndex + 50)
-                    ).toLowerCase();
-                    
-                    const isNearOtherMetric = contextAround.includes('bounce') || 
-                                             contextAround.includes('duration') || 
-                                             contextAround.includes('pages') || 
-                                             contextAround.includes('avg');
-                    
-                    if (!isNearOtherMetric) {
-                      growthRate = parsed;
-                      extractionAttempts.push(`✓ Method 2 (Text context): ${growthRate}%`);
-                    }
-                  }
-                }
-              }
-            }
-          }
-          
-          // ============================================
-          // APPROACH 3: Extract from Graph Tooltip Data
-          // ============================================
-          if (growthRate === null) {
-            // Sometimes growth rate might be in graph tooltips or data attributes
-            try {
-              const allElements = await card.$$('*');
-              for (const el of allElements) {
-                const text = await el.textContent();
-                const html = await el.innerHTML();
-                const attrs = await el.evaluate((e: Element) => {
-                  return {
-                    class: e.className,
-                    id: e.id,
-                    'data-growth': e.getAttribute('data-growth'),
-                    'data-change': e.getAttribute('data-change'),
-                  };
-                });
-                
-                // Check data attributes
-                if (attrs['data-growth']) {
-                  const parsed = parseFloat(attrs['data-growth']);
-                  if (!isNaN(parsed)) {
-                    growthRate = parsed;
-                    extractionAttempts.push(`✓ Method 3 (Data attribute): ${growthRate}%`);
-                    break;
-                  }
-                }
-                
-                // Check if element text contains growth pattern and is near "Total Visits"
-                if (text && text.match(/([+-]\d+\.?\d*)\s*%/) && text.toLowerCase().includes('total visits')) {
-                  const match = text.match(/([+-]\d+\.?\d*)\s*%/);
-                  if (match && match[1]) {
-                    const parsed = parseFloat(match[1]);
-                    if (!isNaN(parsed) && Math.abs(parsed) <= 1000) {
-                      growthRate = parsed;
-                      extractionAttempts.push(`✓ Method 3 (Element text): ${growthRate}%`);
-                      break;
-                    }
-                  }
-                }
-              }
-            } catch (e) {
-              extractionAttempts.push(`✗ Method 3 failed: ${e}`);
-            }
-          }
-          
-          // ============================================
-          // DEEP DEBUG: Log everything if extraction failed
-          // ============================================
-          if (growthRate === null) {
-            const totalVisitsIndex = cardTextLower.indexOf('total visits');
-            const debugInfo = {
-              domain,
-              totalVisitsIndex,
-              cardTextLength: cardText.length,
-              cardHTMLLength: cardHTML.length,
-              cardTextPreview: cardText.substring(0, 800),
-              htmlPreview: cardHTML.substring(0, 1000),
-              allPercentages: cardText.match(/([+-]?\d+\.?\d*)\s*%/g) || [],
-            };
-            
-            console.log(`[${domain}] ⚠ GROWTH RATE EXTRACTION FAILED - DEBUG INFO:`, JSON.stringify(debugInfo, null, 2));
-            extractionAttempts.push(`✗ All methods failed - see debug info above`);
-          } else {
-            console.log(`[${domain}] ✓ Growth rate extracted: ${growthRate}%`);
-            console.log(`[${domain}] Extraction attempts:`, extractionAttempts.join(' | '));
-          }
-        } catch (e) {
-          console.log(`[${domain}] Error in growth rate extraction:`, e);
-          extractionAttempts.push(`✗ Exception: ${e}`);
-        }
+        // Growth Rate extraction removed - feature not reliable
+        const growthRate: number | null = null;
 
         // Extract "Avg. Duration" - format is "00:14:24" or "00:00:16" (HH:MM:SS)
         let avgSessionDuration: string | null = null;
@@ -968,7 +728,6 @@ async function extractFromCards(page: Page, domains: string[]): Promise<TrafficD
             avgSessionDurationSeconds,
             bounceRate,
             pagesPerVisit,
-            growthRate: growthRate, // Use extracted growth rate from traffic.cv UI
             checkedAt: null,
             error: null,
             // Store historical months data for later storage
@@ -1034,7 +793,7 @@ async function extractGeneric(page: Page, domains: string[]): Promise<TrafficDat
           avgSessionDurationSeconds,
           bounceRate,
           pagesPerVisit: null,
-          growthRate: null, // Will be calculated from historical data
+ // Will be calculated from historical data
           checkedAt: null,
           error: null,
         });
@@ -1063,7 +822,6 @@ function generateMockData(domains: string[]): TrafficData[] {
       monthlyVisits: Math.round(visits),
       avgSessionDuration: `${durationMinutes}m ${durationSeconds}s`,
       avgSessionDurationSeconds: durationMinutes * 60 + durationSeconds,
-      growthRate: null, // Will be calculated from historical data
       bounceRate: Math.round((Math.random() * 40 + 30) * 10) / 10,
       pagesPerVisit: Math.round((Math.random() * 3 + 2) * 10) / 10,
       checkedAt: null,

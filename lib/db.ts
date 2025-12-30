@@ -291,7 +291,6 @@ export function getLatestTrafficData(domain: string): TrafficData | null {
     avgSessionDurationSeconds: row.avg_session_duration_seconds,
     bounceRate: row.bounce_rate,
     pagesPerVisit: row.pages_per_visit,
-    growthRate: null, // Will be calculated separately when needed
     checkedAt: row.checked_at,
     error: null,
   };
@@ -318,7 +317,6 @@ export function getLatestTrafficDataBatch(domains: string[]): Map<string, Traffi
       avgSessionDurationSeconds: row.avg_session_duration_seconds,
       bounceRate: row.bounce_rate,
       pagesPerVisit: row.pages_per_visit,
-      growthRate: null, // Will be calculated separately when needed
       checkedAt: row.checked_at,
       error: null,
     });
