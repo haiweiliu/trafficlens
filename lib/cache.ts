@@ -3,7 +3,7 @@
  * Keyed by domain + month to avoid repeated runs
  */
 
-import { TrafficData } from './scraper';
+import { TrafficData } from '@/types';
 
 interface CacheEntry {
   data: TrafficData;

@@ -4,17 +4,7 @@
 
 import { chromium, Browser, Page } from 'playwright';
 import { parseNumberWithSuffix, parseDurationToSeconds, parsePercentage } from './parsing-utils';
-
-export interface TrafficData {
-  domain: string;
-  monthlyVisits: number | null;
-  avgSessionDuration: string | null;
-  avgSessionDurationSeconds: number | null;
-  bounceRate: number | null;
-  pagesPerVisit: number | null;
-  checkedAt: string | null;
-  error: string | null;
-}
+import { TrafficData } from '@/types';
 
 /**
  * Scrapes traffic data from Traffic.cv bulk endpoint
