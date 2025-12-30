@@ -247,7 +247,7 @@ async function extractFromTable(page: Page, domains: string[]): Promise<TrafficD
 
     // Get table headers to understand column order
     const headerRow = await page.$('table thead tr, table tr:first-child');
-    let columnOrder: { visits?: number; duration?: number; pages?: number; bounce?: number } = {};
+    let columnOrder: { visits?: number; duration?: number; pages?: number; bounce?: number; growth?: number } = {};
     
     if (headerRow) {
       const headers = await headerRow.$$('th, td');
@@ -261,6 +261,8 @@ async function extractFromTable(page: Page, domains: string[]): Promise<TrafficD
           columnOrder.pages = i;
         } else if (headerText.includes('bounce')) {
           columnOrder.bounce = i;
+        } else if (headerText.includes('growth') || headerText.includes('decline') || headerText.includes('change')) {
+          columnOrder.growth = i;
         }
       }
     }
@@ -407,6 +409,37 @@ async function extractFromTable(page: Page, domains: string[]): Promise<TrafficD
           }
         }
 
+        // Extract growth rate (usually shown as +19.66% or -39.36%)
+        let growthRate: number | null = null;
+        const growthIndex = columnOrder.growth;
+        if (growthIndex !== undefined && cellTexts[growthIndex]) {
+          const growthText = cellTexts[growthIndex]!;
+          // Match +19.66% or -39.36% pattern
+          const growthMatch = growthText.match(/([+-]?\d+\.?\d*)\s*%/);
+          if (growthMatch && growthMatch[1]) {
+            const parsed = parseFloat(growthMatch[1]);
+            if (!isNaN(parsed) && Math.abs(parsed) <= 1000) {
+              growthRate = parsed;
+            }
+          }
+        }
+        // Fallback: search all cells for growth pattern
+        if (growthRate === null) {
+          for (const text of cellTexts) {
+            if (text) {
+              const growthMatch = text.match(/([+-]?\d+\.?\d*)\s*%/);
+              if (growthMatch && growthMatch[1]) {
+                const parsed = parseFloat(growthMatch[1]);
+                // Make sure it's not bounce rate (bounce rate is 0-100%, growth can be >100%)
+                if (!isNaN(parsed) && Math.abs(parsed) <= 1000 && (Math.abs(parsed) > 100 || text.includes('growth') || text.includes('change') || text.includes('decline'))) {
+                  growthRate = parsed;
+                  break;
+                }
+              }
+            }
+          }
+        }
+
         results.push({
           domain,
           monthlyVisits,
@@ -414,7 +447,7 @@ async function extractFromTable(page: Page, domains: string[]): Promise<TrafficD
           avgSessionDurationSeconds,
           bounceRate,
           pagesPerVisit,
-          growthRate: null, // Will be calculated from historical data
+          growthRate: growthRate, // Use extracted growth rate from table
           checkedAt: null,
           error: null,
         });
@@ -591,6 +624,45 @@ async function extractFromCards(page: Page, domains: string[]): Promise<TrafficD
           }
         }
 
+        // Extract Growth Rate directly from traffic.cv UI
+        // Format: "+19.66%" or "-39.36%" shown near "Total Visits"
+        let growthRate: number | null = null;
+        const growthPatterns = [
+          /([+-]?\d+\.?\d*)\s*%/,  // Match +19.66% or -39.36%
+          /growth[:\s]+([+-]?\d+\.?\d*)\s*%/i,
+          /change[:\s]+([+-]?\d+\.?\d*)\s*%/i,
+        ];
+        
+        // Look for growth rate near "Total Visits" (usually within 100 chars)
+        const totalVisitsIndex = cardText.toLowerCase().indexOf('total visits');
+        if (totalVisitsIndex !== -1) {
+          const context = cardText.substring(totalVisitsIndex, Math.min(cardText.length, totalVisitsIndex + 150));
+          for (const pattern of growthPatterns) {
+            const match = context.match(pattern);
+            if (match && match[1]) {
+              const parsed = parseFloat(match[1]);
+              if (!isNaN(parsed) && Math.abs(parsed) <= 1000) { // Reasonable range: -1000% to +1000%
+                growthRate = parsed;
+                break;
+              }
+            }
+          }
+        }
+        
+        // Fallback: search entire card for growth percentage
+        if (growthRate === null) {
+          for (const pattern of growthPatterns) {
+            const match = cardText.match(pattern);
+            if (match && match[1]) {
+              const parsed = parseFloat(match[1]);
+              if (!isNaN(parsed) && Math.abs(parsed) <= 1000) {
+                growthRate = parsed;
+                break;
+              }
+            }
+          }
+        }
+
         // Extract "Avg. Duration" - format is "00:14:24" or "00:00:16" (HH:MM:SS)
         let avgSessionDuration: string | null = null;
         let avgSessionDurationSeconds: number | null = null;
@@ -728,7 +800,7 @@ async function extractFromCards(page: Page, domains: string[]): Promise<TrafficD
             avgSessionDurationSeconds,
             bounceRate,
             pagesPerVisit,
-            growthRate: null, // Will be calculated from historical data
+            growthRate: growthRate, // Use extracted growth rate from traffic.cv UI
             checkedAt: null,
             error: null,
             // Store historical months data for later storage

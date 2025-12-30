@@ -193,15 +193,17 @@ export async function POST(request: NextRequest) {
         // Store results in database and in-memory cache
         for (const result of batchResults) {
           if (!result.error) {
-            // Calculate growth rate from historical months if available
-            let growthRate: number | null = null;
+            // Use growth rate extracted directly from traffic.cv UI (most accurate)
+            // Fall back to calculation from historical data only if not extracted
+            let growthRate: number | null = result.growthRate ?? null;
             const historicalMonths = (result as any).historicalMonths;
             const currentMonth = getCurrentMonth();
             const currentVisits = result.monthlyVisits;
             
-            console.log(`Calculating growth for ${result.domain}: currentMonth=${currentMonth}, currentVisits=${currentVisits}, historicalMonths=${historicalMonths?.length || 0}`);
-            
-            if (historicalMonths && Array.isArray(historicalMonths) && historicalMonths.length > 0 && currentVisits) {
+            // If growth rate wasn't extracted from UI, try calculating from historical data
+            if (growthRate === null && historicalMonths && Array.isArray(historicalMonths) && historicalMonths.length > 0 && currentVisits) {
+              console.log(`Growth not extracted from UI for ${result.domain}, calculating from historical data...`);
+              
               // Add current month to the list if not present
               const allMonths = [...historicalMonths];
               if (!allMonths.find(m => m.monthYear === currentMonth)) {
@@ -237,6 +239,8 @@ export async function POST(request: NextRequest) {
                   console.log(`Growth calculated from historical (fallback): ${result.domain} = ${growthRate}%`);
                 }
               }
+            } else if (growthRate !== null) {
+              console.log(`Using growth rate extracted from traffic.cv UI for ${result.domain}: ${growthRate}%`);
             }
             
             const resultWithTimestamp: TrafficData = {
