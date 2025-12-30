@@ -118,6 +118,20 @@ function getCurrentMonth(): string {
 }
 
 /**
+ * Convert seconds to formatted duration string (HH:MM:SS)
+ * Example: 113 -> "00:01:53"
+ */
+function formatDurationFromSeconds(seconds: number | null): string | null {
+  if (seconds === null || seconds === undefined) return null;
+  
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+/**
  * Get the month that SimilarWeb data should represent based on current date
  * 
  * SimilarWeb releases monthly data by the 10th of the following month.
@@ -218,7 +232,7 @@ export function getLatestTrafficData(domain: string): TrafficData | null {
   return {
     domain: row.domain,
     monthlyVisits: row.monthly_visits,
-    avgSessionDuration: null, // Convert seconds to string if needed
+    avgSessionDuration: formatDurationFromSeconds(row.avg_session_duration_seconds),
     avgSessionDurationSeconds: row.avg_session_duration_seconds,
     bounceRate: row.bounce_rate,
     pagesPerVisit: row.pages_per_visit,
@@ -244,7 +258,7 @@ export function getLatestTrafficDataBatch(domains: string[]): Map<string, Traffi
     result.set(row.domain, {
       domain: row.domain,
       monthlyVisits: row.monthly_visits,
-      avgSessionDuration: null,
+      avgSessionDuration: formatDurationFromSeconds(row.avg_session_duration_seconds),
       avgSessionDurationSeconds: row.avg_session_duration_seconds,
       bounceRate: row.bounce_rate,
       pagesPerVisit: row.pages_per_visit,
