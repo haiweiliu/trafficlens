@@ -191,9 +191,9 @@ export async function POST(request: NextRequest) {
         // Store results in database and in-memory cache
         for (const result of batchResults) {
           if (!result.error) {
-            const resultWithTimestamp = {
+            const resultWithTimestamp: TrafficData = {
               ...result,
-              growthRate: result.growthRate ?? null,
+              growthRate: (result as any).growthRate ?? null,
               checkedAt: result.checkedAt || new Date().toISOString(),
             };
             
