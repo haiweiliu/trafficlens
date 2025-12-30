@@ -1,7 +1,7 @@
 {
   "name": "trafficlens",
   "version": "1.0.0",
-  "description": "",
+  "description": "TrafficLens - Website Traffic Analytics Tool. Analyze traffic data for multiple domains with insights on visits, growth trends, and engagement metrics.",
   "main": "index.js",
   "engines": {
     "node": ">=20.9.0",

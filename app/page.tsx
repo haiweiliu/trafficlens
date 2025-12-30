@@ -94,16 +94,12 @@ export default function Home() {
   return (
     <main className="min-h-screen p-8 max-w-7xl mx-auto">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">Traffic Bulk Extractor</h1>
-        <p className="text-gray-600 mb-4">
-          Estimate website traffic by scraping Traffic.cv's Bulk Traffic Checker
+        <h1 className="text-4xl font-bold mb-3 bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+          TrafficLens
+        </h1>
+        <p className="text-lg text-gray-700 mb-6">
+          Analyze website traffic data for multiple domains. Get insights on monthly visits, growth trends, engagement metrics, and more.
         </p>
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
-          <p className="text-sm text-yellow-800">
-            <strong>Note:</strong> This tool fetches publicly visible estimates from traffic.cv. 
-            Please respect their Terms/limits.
-          </p>
-        </div>
       </div>
 
       <div className="bg-white rounded-lg shadow-md p-6 mb-6">
