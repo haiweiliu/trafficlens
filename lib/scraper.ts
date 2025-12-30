@@ -105,13 +105,43 @@ export async function scrapeTrafficData(
       }
     }
 
-    // Optimize: Minimal wait time - only wait if we found results
+    // Wait for data to render - balance between speed and reliability
     if (resultsFound) {
-      // Wait just enough for data to render (reduced from 3s to 1.5s)
-      await page.waitForTimeout(1500);
-    } else {
-      // Give a bit more time if no selector found (reduced from 5s to 3s)
+      // Wait for data to fully render (3s ensures data is loaded)
       await page.waitForTimeout(3000);
+      
+      // Additional check: Verify cards/table have actual content with metrics
+      try {
+        await page.waitForFunction(
+          () => {
+            const cards = document.querySelectorAll('[class*="card"], table tbody tr, [class*="result"]');
+            let cardsWithData = 0;
+            for (const card of cards) {
+              const text = card.textContent || '';
+              // Check if card has both domain and metrics (visits, duration, or percentage)
+              if (text.length > 20 && 
+                  text.match(/[a-z0-9]+\.[a-z]{2,}/i) && // Has domain
+                  (text.match(/[\d.,]+\s*[KMkmBb]/i) || // Has visits number
+                   text.match(/\d{2}:\d{2}:\d{2}/) || // Has duration
+                   text.match(/[\d.]+%/))) { // Has percentage
+                cardsWithData++;
+              }
+            }
+            // Need at least 2 cards with data to ensure page is fully loaded
+            return cardsWithData >= Math.min(2, cards.length);
+          },
+          { timeout: 5000 }
+        ).catch(() => {
+          // Continue even if this check times out - data might still be there
+          console.log('Content verification timeout, proceeding anyway');
+        });
+      } catch (e) {
+        // Continue if check fails
+        console.log('Content verification failed, proceeding anyway');
+      }
+    } else {
+      // Give more time if no selector found
+      await page.waitForTimeout(5000);
     }
 
     // Minimal debug logging for performance
@@ -120,6 +150,8 @@ export async function scrapeTrafficData(
     // Try to find results in table format first (most common)
     const tableResults = await extractFromTable(page, domains);
     if (tableResults.length > 0) {
+      console.log(`Extracted ${tableResults.length} results from table (expected ${domains.length} domains)`);
+      
       // Ensure all domains have results (fill missing ones with errors)
       const foundDomains = new Set(tableResults.map(r => r.domain.toLowerCase().replace(/^www\./, '')));
       const missingDomains = domains.filter(d => {
@@ -127,9 +159,8 @@ export async function scrapeTrafficData(
         return !foundDomains.has(dNorm);
       });
       
-      // For missing domains, try www. version if non-www. was requested, or vice versa
       if (missingDomains.length > 0) {
-        console.log(`Missing ${missingDomains.length} domains, attempting retry with www. variations`);
+        console.log(`Missing ${missingDomains.length} domains in table: ${missingDomains.join(', ')}`);
       }
       
       // Add error results for truly missing domains
@@ -193,7 +224,6 @@ export async function scrapeTrafficData(
       avgSessionDurationSeconds: null,
       bounceRate: null,
       pagesPerVisit: null,
-      growthRate: null,
       checkedAt: null,
       error: errorMsg,
     }));
@@ -528,7 +558,11 @@ async function extractFromCards(page: Page, domains: string[]): Promise<TrafficD
           }
         }
 
-        if (!domainText) continue;
+        if (!domainText) {
+          // Debug: Log when domain not found in card
+          console.log(`Domain not found in card text. Card preview: ${cardText.substring(0, 200)}...`);
+          continue;
+        }
 
         // Normalize domainText to match with our domain map
         let domain = domainText.trim().toLowerCase();
@@ -749,7 +783,18 @@ async function extractFromCards(page: Page, domains: string[]): Promise<TrafficD
       }
     }
 
-    console.log(`Extracted ${results.length} results from cards`);
+    console.log(`Extracted ${results.length} results from cards (expected ${domains.length} domains)`);
+    
+    // Debug: Log which domains were found vs expected
+    const foundDomains = new Set(results.map(r => r.domain.toLowerCase().replace(/^www\./, '')));
+    const missingDomains = domains.filter(d => {
+      const dNorm = d.toLowerCase().replace(/^www\./, '');
+      return !foundDomains.has(dNorm);
+    });
+    if (missingDomains.length > 0) {
+      console.log(`Missing domains in card extraction: ${missingDomains.join(', ')}`);
+    }
+    
     return results;
   } catch (error) {
     console.error('Error in extractFromCards:', error);
