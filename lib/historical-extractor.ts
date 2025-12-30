@@ -21,6 +21,8 @@ export async function extractHistoricalMonths(
   const results: HistoricalMonthData[] = [];
   
   try {
+    // Wait a bit for graph to render
+    await page.waitForTimeout(2000);
     // Look for the "Visits Over Time" graph
     // It could be in various formats: SVG, canvas, or text-based
     // Try multiple selectors
@@ -80,6 +82,8 @@ export async function extractHistoricalMonths(
     
     for (const pattern of tooltipPatterns) {
       let match;
+      // Reset regex lastIndex
+      pattern.lastIndex = 0;
       while ((match = pattern.exec(pageText)) !== null) {
         const [_, year, month, visitsStr] = match;
         const monthYear = `${year}-${month}`;
@@ -87,6 +91,26 @@ export async function extractHistoricalMonths(
         if (visits && visits > 0) {
           // Avoid duplicates
           if (!results.find(r => r.monthYear === monthYear)) {
+            results.push({ monthYear, monthlyVisits: visits });
+          }
+        }
+      }
+    }
+    
+    // Method 2.5: Look for hover tooltips or chart data in HTML
+    // Some charts show data on hover - try to trigger hover or find hidden data
+    const chartElements = await page.$$('[class*="chart"], [class*="graph"], [class*="visits-over-time"]');
+    for (const chart of chartElements) {
+      const chartText = await chart.textContent();
+      if (chartText) {
+        // Look for patterns like "2025/09" followed by numbers
+        const monthDataPattern = /(\d{4})\/(\d{2})[^\d]*([\d.,]+\s*[KMkmBb]?)/g;
+        let match;
+        while ((match = monthDataPattern.exec(chartText)) !== null) {
+          const [_, year, month, visitsStr] = match;
+          const monthYear = `${year}-${month}`;
+          const visits = parseNumberWithSuffix(visitsStr);
+          if (visits && visits > 0 && !results.find(r => r.monthYear === monthYear)) {
             results.push({ monthYear, monthlyVisits: visits });
           }
         }
@@ -138,10 +162,17 @@ export async function extractHistoricalMonths(
     // Sort by month (most recent first)
     results.sort((a, b) => b.monthYear.localeCompare(a.monthYear));
 
+    // Log for debugging
+    if (results.length > 0) {
+      console.log(`Extracted ${results.length} historical months for ${domain}:`, results.map(r => `${r.monthYear}=${r.monthlyVisits}`).join(', '));
+    } else {
+      console.log(`No historical months extracted for ${domain}`);
+    }
+
     // Return up to 3 months (last 3 months)
     return results.slice(0, 3);
   } catch (error) {
-    console.error('Error extracting historical months:', error);
+    console.error(`Error extracting historical months for ${domain}:`, error);
     return [];
   }
 }

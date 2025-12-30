@@ -199,6 +199,8 @@ export async function POST(request: NextRequest) {
             const currentMonth = getCurrentMonth();
             const currentVisits = result.monthlyVisits;
             
+            console.log(`Calculating growth for ${result.domain}: currentMonth=${currentMonth}, currentVisits=${currentVisits}, historicalMonths=${historicalMonths?.length || 0}`);
+            
             if (historicalMonths && Array.isArray(historicalMonths) && historicalMonths.length > 0 && currentVisits) {
               // Add current month to the list if not present
               const allMonths = [...historicalMonths];
@@ -211,6 +213,8 @@ export async function POST(request: NextRequest) {
                 b.monthYear.localeCompare(a.monthYear)
               );
               
+              console.log(`Sorted months for ${result.domain}:`, sortedMonths.map(m => `${m.monthYear}=${m.monthlyVisits}`).join(', '));
+              
               // Find current month index
               const currentIndex = sortedMonths.findIndex(m => m.monthYear === currentMonth);
               
@@ -222,6 +226,7 @@ export async function POST(request: NextRequest) {
                   // Calculate growth: ((current - previous) / previous) * 100
                   growthRate = ((currentVisits - previousMonth.monthlyVisits) / previousMonth.monthlyVisits) * 100;
                   growthRate = Math.round(growthRate * 100) / 100; // Round to 2 decimal places
+                  console.log(`Growth calculated from historical: ${result.domain} = ${growthRate}% (current=${currentVisits}, previous=${previousMonth.monthlyVisits})`);
                 }
               } else if (sortedMonths.length >= 2) {
                 // If current month is first, compare with second (previous month)
@@ -229,6 +234,7 @@ export async function POST(request: NextRequest) {
                 if (previousMonth?.monthlyVisits && previousMonth.monthlyVisits > 0) {
                   growthRate = ((currentVisits - previousMonth.monthlyVisits) / previousMonth.monthlyVisits) * 100;
                   growthRate = Math.round(growthRate * 100) / 100;
+                  console.log(`Growth calculated from historical (fallback): ${result.domain} = ${growthRate}%`);
                 }
               }
             }
