@@ -84,7 +84,7 @@ export async function retryScrapeTrafficData(
           bounceRate: null,
           pagesPerVisit: null,
           checkedAt: null,
-          error: lastError.message,
+          error: lastError?.message || 'Unknown error',
         }));
       }
     }
