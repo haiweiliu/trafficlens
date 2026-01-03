@@ -8,6 +8,7 @@ import { getLatestTrafficDataBatch, isDataFresh } from '../lib/db';
 import { normalizeDomains } from '../lib/domain-utils';
 import { TrafficData } from '../types';
 import { sendQAErrorEmail } from '../lib/email';
+import { runAutoFixWorkflow } from './auto-fix-agent';
 
 interface QAResult {
   testName: string;
@@ -355,6 +356,21 @@ export async function runQATests(): Promise<QAReport> {
   console.log(`Failed: ${report.failed}`);
   console.log(`Auto-fixed: ${report.fixed}`);
   
+  // Auto-fix workflow: If selector errors detected, run auto-fix agent
+  const selectorErrors = report.results.filter(r => 
+    !r.passed && r.error?.toLowerCase().includes('selector')
+  );
+
+  if (selectorErrors.length > 0) {
+    console.log(`\n🔧 Detected ${selectorErrors.length} selector error(s) - Running auto-fix agent...`);
+    try {
+      await runAutoFixWorkflow();
+      console.log('✅ Auto-fix workflow completed');
+    } catch (error) {
+      console.error('❌ Auto-fix workflow error:', error);
+    }
+  }
+
   // Send email notification if there are errors
   if (report.failed > 0) {
     console.log('\n📧 Sending error notification email...');
