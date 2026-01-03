@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { normalizeDomains, parseDomains } from '@/lib/domain-utils';
 import { TrafficData, TrafficResponse } from '@/types';
 import TrafficTable from '@/components/TrafficTable';
@@ -13,6 +13,7 @@ export default function Home() {
   const [progress, setProgress] = useState('');
   const [dryRun, setDryRun] = useState(false);
   const [bypassCache, setBypassCache] = useState(false);
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleNormalize = () => {
     if (!input.trim()) return;
@@ -80,8 +81,25 @@ export default function Home() {
       if (cacheMisses > 0) {
         setProgress(`Showing ${cacheHits} cached results. Scraping ${cacheMisses} domains in background...`);
         
-        // Poll for updates every 2 seconds
+        const MAX_POLL_TIME = 120000; // 2 minutes max
+        const POLL_INTERVAL = 2000; // Poll every 2 seconds
+        const startTime = Date.now();
+        let pollCount = 0;
+        
+        // Poll for updates every 2 seconds, max 2 minutes
         const pollInterval = setInterval(async () => {
+          pollCount++;
+          const elapsed = Date.now() - startTime;
+          
+          // Timeout after 2 minutes
+          if (elapsed >= MAX_POLL_TIME) {
+            clearInterval(pollInterval);
+            setLoading(false);
+            setProgress('Background scraping timed out (2 min). Some domains may still be processing. Refresh to check updates.');
+            setTimeout(() => setProgress(''), 5000);
+            return;
+          }
+          
           try {
             const updateResponse = await fetch(`/api/traffic/update?domains=${domainsToCheck.join(',')}`);
             if (updateResponse.ok) {
@@ -93,7 +111,7 @@ export default function Home() {
               );
               const mergedResults = data.results.map((result: TrafficData) => {
                 const updated = updatedMap.get(result.domain);
-                if (updated && updated.error && !updated.error.includes('Still scraping')) {
+                if (updated && updated.error && !updated.error.includes('Still scraping') && !updated.error.includes('Scraping in background')) {
                   return updated;
                 } else if (updated && !updated.error) {
                   return updated;
@@ -103,29 +121,34 @@ export default function Home() {
               
               setResults(mergedResults);
               
-              // Check if all done
-              const stillScraping = mergedResults.some(r => r.error?.includes('Still scraping') || r.error?.includes('Scraping in background'));
+              // Check if all done (no "Still scraping" or "Scraping in background" errors)
+              const stillScraping = mergedResults.some(r => 
+                r.error?.includes('Still scraping') || 
+                r.error?.includes('Scraping in background')
+              );
+              
               if (!stillScraping) {
                 clearInterval(pollInterval);
                 setProgress(`Completed! ${cacheHits} from cache, ${cacheMisses} scraped.`);
                 setLoading(false);
                 setTimeout(() => setProgress(''), 3000);
+              } else {
+                // Update progress with time remaining
+                const remaining = Math.ceil((MAX_POLL_TIME - elapsed) / 1000);
+                const completed = cacheMisses - mergedResults.filter(r => 
+                  r.error?.includes('Still scraping') || r.error?.includes('Scraping in background')
+                ).length;
+                setProgress(`Showing ${cacheHits} cached results. Scraping ${cacheMisses} domains (${completed}/${cacheMisses} done, ${remaining}s remaining)...`);
               }
             }
           } catch (error) {
             console.error('Polling error:', error);
+            // Don't stop polling on network errors, but log them
           }
-        }, 2000);
+        }, POLL_INTERVAL);
         
-        // Stop polling after 2 minutes
-        setTimeout(() => {
-          clearInterval(pollInterval);
-          if (loading) {
-            setLoading(false);
-            setProgress('Background scraping may still be in progress. Refresh to see updates.');
-            setTimeout(() => setProgress(''), 5000);
-          }
-        }, 120000);
+        // Store interval for cleanup
+        pollIntervalRef.current = pollInterval;
       } else {
         setProgress(`All ${cacheHits} results from cache!`);
         setLoading(false);
@@ -144,7 +167,22 @@ export default function Home() {
     setInput('');
     setResults([]);
     setProgress('');
+    // Clear any ongoing polling
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+    setLoading(false);
   };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+    };
+  }, []);
 
   return (
     <main className="min-h-screen p-8 max-w-7xl mx-auto">

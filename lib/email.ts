@@ -30,6 +30,11 @@ interface QATestResult {
   passed?: boolean;
   error?: string;
   fixed?: boolean;
+  details?: {
+    deepFixAttempted?: boolean;
+    deepFixAttempts?: Array<{ strategy: string; success: boolean; details: string }>;
+    needsManualIntervention?: boolean;
+  };
 }
 
 export async function sendQAErrorEmail(report: {
@@ -52,8 +57,18 @@ export async function sendQAErrorEmail(report: {
     const needsManualFix = report.needsManualFix || report.failed;
     
     const errorList = failedTests
-      .map(test => `• ${test.testName}: ${test.error || 'Unknown error'}${test.fixed ? ' ✅ (Auto-fixed)' : ' ⚠️ (Needs manual fix)'}`)
-      .join('\n');
+      .map(test => {
+        const status = test.fixed 
+          ? ' ✅ (Auto-fixed)' 
+          : (test.details?.needsManualIntervention 
+            ? ' 🔴 (Deep fix failed - Manual intervention required)' 
+            : ' ⚠️ (Needs manual fix)');
+        const deepFixInfo = test.details?.deepFixAttempted 
+          ? `\n    Deep fix attempts: ${test.details.deepFixAttempts?.map((a: any) => `\n      - ${a.strategy}: ${a.success ? '✅' : '❌'} ${a.details}`).join('')}` 
+          : '';
+        return `• ${test.testName}: ${test.error || 'Unknown error'}${status}${deepFixInfo}`;
+      })
+      .join('\n\n');
 
     const html = `
       <h2>⚠️ TrafficLens QA Tests Failed</h2>

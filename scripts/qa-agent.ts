@@ -317,19 +317,55 @@ export async function runQATests(): Promise<QAReport> {
       console.log(`❌ ${result.testName} FAILED: ${result.error}`);
       
       // Attempt auto-fix for specific errors
+      // Initial fix attempt
+      let initialFixAttempted = false;
+      let initialFixSucceeded = false;
+      
       if (result.error?.includes('scraping') || result.error?.includes('browserType')) {
+        initialFixAttempted = true;
         const fixResult = await autoFixScrapingErrors();
         if (fixResult.fixed) {
           result.fixed = true;
+          initialFixSucceeded = true;
           console.log(`✅ Auto-fixed: ${result.testName}`);
         }
       }
       
-      if (result.error?.includes('cache') || result.error?.includes('stale')) {
+      if (!initialFixSucceeded && (result.error?.includes('cache') || result.error?.includes('stale'))) {
+        initialFixAttempted = true;
         const fixResult = await autoFixStaleCache();
         if (fixResult.fixed) {
           result.fixed = true;
+          initialFixSucceeded = true;
           console.log(`✅ Auto-fixed: ${result.testName}`);
+        }
+      }
+      
+      // If initial fix failed, try deep fix strategies
+      if (initialFixAttempted && !initialFixSucceeded && result.error) {
+        console.log(`\n🧠 Initial fix failed for ${result.testName}, trying deep fix strategies...`);
+        
+        // Extract domain from error or test name
+        const domainMatch = result.error.match(/([a-z0-9.-]+\.[a-z]{2,})/i) || 
+                          result.testName.match(/([a-z0-9.-]+\.[a-z]{2,})/i);
+        
+        if (domainMatch) {
+          const domain = domainMatch[1];
+          const { applyDeepFixStrategies } = await import('./deep-fix-agent');
+          const deepFixResult = await applyDeepFixStrategies(domain, result.error);
+          
+          if (deepFixResult.fixed) {
+            result.fixed = true;
+            result.details = { deepFixAttempts: deepFixResult.attempts };
+            console.log(`✅ Deep fix succeeded for ${result.testName}`);
+          } else {
+            result.details = { 
+              deepFixAttempted: true,
+              deepFixAttempts: deepFixResult.attempts,
+              needsManualIntervention: true,
+            };
+            console.log(`❌ Deep fix failed for ${result.testName} - requires manual intervention`);
+          }
         }
       }
     } else {
