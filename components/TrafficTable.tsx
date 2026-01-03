@@ -173,9 +173,16 @@ export default function TrafficTable({ results }: TrafficTableProps) {
               </td>
               <td className="px-6 py-4 whitespace-nowrap text-sm">
                 {result.error ? (
-                  <span className="text-red-600" title={result.error}>
-                    ⚠ {result.error}
-                  </span>
+                  // Only show error if it's not a background retry message
+                  result.error.includes('Retrying in background') ? (
+                    <span className="text-blue-600" title="Retrying in background, will update automatically">
+                      🔄 Retrying...
+                    </span>
+                  ) : (
+                    <span className="text-red-600" title={result.error}>
+                      ⚠ {result.error}
+                    </span>
+                  )
                 ) : (
                   <span className="text-green-600">✓</span>
                 )}

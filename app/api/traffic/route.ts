@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { normalizeDomains, chunkArray } from '@/lib/domain-utils';
 import { scrapeTrafficData } from '@/lib/scraper';
+import { retryScrapeTrafficData, backgroundRetryFailedDomains } from '@/lib/retry-scraper';
 import { TrafficData } from '@/types';
 import { trafficCache } from '@/lib/cache';
 import { 
@@ -201,8 +202,13 @@ export async function POST(request: NextRequest) {
       console.log(`Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} domains)`);
 
       try {
-        // Scrape this batch (runs in parallel with other batches)
-        const batchResults = await scrapeTrafficData(batch, dryRun);
+        // Scrape this batch with retry logic (runs in parallel with other batches)
+        const batchResults = await retryScrapeTrafficData(batch, {
+          maxRetries: 2,
+          initialDelay: 8000, // 8 seconds initial wait
+          maxDelay: 30000, // 30 seconds max
+          backoffMultiplier: 1.5,
+        });
 
         // Ensure we have results for all domains in the batch
         const foundDomains = new Set(batchResults.map(r => r.domain.toLowerCase().replace(/^www\./, '')));
@@ -248,7 +254,7 @@ export async function POST(request: NextRequest) {
           checkedAt: r.checkedAt || timestamp,
         }));
 
-        // Add error results for missing domains
+        // Add results for missing domains (will be retried in background)
         const missingResults: TrafficData[] = missingDomains.map(domain => ({
           domain,
           monthlyVisits: null,
@@ -257,8 +263,16 @@ export async function POST(request: NextRequest) {
           bounceRate: null,
           pagesPerVisit: null,
           checkedAt: timestamp,
-          error: 'Domain not found in scraping results',
+          error: 'Retrying in background...', // Temporary - will be updated
         }));
+        
+        // Start background retry for missing domains
+        if (missingDomains.length > 0 && !dryRun) {
+          backgroundRetryFailedDomains(missingDomains, (retryResults) => {
+            console.log(`Background retry completed for ${retryResults.length} domains`);
+            // Results will be stored in database by backgroundRetryFailedDomains
+          });
+        }
 
         return {
           success: true,

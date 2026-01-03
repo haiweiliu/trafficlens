@@ -202,18 +202,38 @@ export async function scrapeTrafficData(
         console.log(`Missing ${missingDomains.length} domains in table: ${missingDomains.join(', ')}`);
       }
       
-      // Add error results for truly missing domains
+      // Check if missing domains appear on page but have 0 traffic
+      const pageText = await page.textContent('body') || '';
       for (const domain of missingDomains) {
-        tableResults.push({
-          domain,
-          monthlyVisits: null,
-          avgSessionDuration: null,
-          avgSessionDurationSeconds: null,
-          bounceRate: null,
-          pagesPerVisit: null,
-          checkedAt: null,
-          error: 'Domain not found in results',
-        });
+        const domainNorm = domain.toLowerCase().replace(/^www\./, '');
+        // Check if domain appears on page (might have 0 traffic)
+        const domainOnPage = pageText.toLowerCase().includes(domainNorm);
+        
+        if (domainOnPage) {
+          // Domain found but no metrics - likely 0 traffic (not an error)
+          tableResults.push({
+            domain,
+            monthlyVisits: 0, // Explicitly 0, not null
+            avgSessionDuration: null,
+            avgSessionDurationSeconds: null,
+            bounceRate: null,
+            pagesPerVisit: null,
+            checkedAt: null,
+            error: null, // No error - site has 0 traffic
+          });
+        } else {
+          // Domain truly not found - this is an error
+          tableResults.push({
+            domain,
+            monthlyVisits: null,
+            avgSessionDuration: null,
+            avgSessionDurationSeconds: null,
+            bounceRate: null,
+            pagesPerVisit: null,
+            checkedAt: null,
+            error: 'Domain not found in results',
+          });
+        }
       }
       
       return tableResults;
@@ -241,17 +261,38 @@ export async function scrapeTrafficData(
         console.log(`Missing ${missingDomains.length} domains in cards: ${missingDomains.join(', ')}`);
       }
       
+      // Check if missing domains appear on page but have 0 traffic
+      const pageText = await page.textContent('body') || '';
       for (const domain of missingDomains) {
-        cardResults.push({
-          domain,
-          monthlyVisits: null,
-          avgSessionDuration: null,
-          avgSessionDurationSeconds: null,
-          bounceRate: null,
-          pagesPerVisit: null,
-          checkedAt: null,
-          error: 'Domain not found in results',
-        });
+        const domainNorm = domain.toLowerCase().replace(/^www\./, '');
+        // Check if domain appears on page (might have 0 traffic)
+        const domainOnPage = pageText.toLowerCase().includes(domainNorm);
+        
+        if (domainOnPage) {
+          // Domain found but no metrics - likely 0 traffic (not an error)
+          cardResults.push({
+            domain,
+            monthlyVisits: 0, // Explicitly 0, not null
+            avgSessionDuration: null,
+            avgSessionDurationSeconds: null,
+            bounceRate: null,
+            pagesPerVisit: null,
+            checkedAt: null,
+            error: null, // No error - site has 0 traffic
+          });
+        } else {
+          // Domain truly not found - this is an error
+          cardResults.push({
+            domain,
+            monthlyVisits: null,
+            avgSessionDuration: null,
+            avgSessionDurationSeconds: null,
+            bounceRate: null,
+            pagesPerVisit: null,
+            checkedAt: null,
+            error: 'Domain not found in results',
+          });
+        }
       }
       
       return cardResults;

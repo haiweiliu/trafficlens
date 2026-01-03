@@ -16,7 +16,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "qa": "tsx scripts/qa-agent.ts",
     "qa:daily": "bash scripts/run-qa.sh",
-    "usage:report": "tsx scripts/usage-agent.ts"
+    "usage:report": "tsx scripts/usage-agent.ts",
+    "test:email": "tsx scripts/test-email.ts"
   },
   "keywords": [],
   "author": "",
