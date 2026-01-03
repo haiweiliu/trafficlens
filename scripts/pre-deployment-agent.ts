@@ -502,7 +502,7 @@ export async function runPreDeploymentValidation(): Promise<PreDeploymentReport>
     await testFileSystemPermissions(),
     await testDatabaseConnectivity(),
     await testBrowserAvailability(),
-  ];
+  ].filter(Boolean) as ValidationTest[];
   
   const passed = tests.filter(t => t.passed).length;
   const failed = tests.filter(t => !t.passed).length;
