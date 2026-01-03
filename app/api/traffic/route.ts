@@ -129,7 +129,7 @@ async function scrapeInBackground(
             storeTrafficData(result);
             
             // Store historical months if available
-            if ('historicalMonths' in result && result.historicalMonths) {
+            if ('historicalMonths' in result && result.historicalMonths && Array.isArray(result.historicalMonths)) {
               storeHistoricalTrafficData(result.domain, result.historicalMonths, result);
             }
           }
