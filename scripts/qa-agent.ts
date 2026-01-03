@@ -357,14 +357,20 @@ export async function runQATests(): Promise<QAReport> {
   console.log(`Auto-fixed: ${report.fixed}`);
   
   // Auto-fix workflow: If selector errors detected, run auto-fix agent
-  const selectorErrors = report.results.filter(r => 
-    !r.passed && r.error?.toLowerCase().includes('selector')
-  );
+  const selectorErrors = report.results
+    .filter(r => !r.passed && r.error?.toLowerCase().includes('selector'))
+    .map(r => {
+      // Extract domain from test name or error message
+      const domainMatch = r.error?.match(/([a-z0-9.-]+\.[a-z]{2,})/i);
+      const domain = domainMatch ? domainMatch[1] : 'unknown';
+      return { domain, error: r.error || 'Unknown selector error' };
+    })
+    .filter(e => e.domain !== 'unknown');
 
   if (selectorErrors.length > 0) {
     console.log(`\n🔧 Detected ${selectorErrors.length} selector error(s) - Running auto-fix agent...`);
     try {
-      await runAutoFixWorkflow();
+      await runAutoFixWorkflow(selectorErrors);
       console.log('✅ Auto-fix workflow completed');
     } catch (error) {
       console.error('❌ Auto-fix workflow error:', error);

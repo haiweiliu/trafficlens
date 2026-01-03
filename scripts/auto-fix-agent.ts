@@ -88,18 +88,24 @@ export async function autoFixSelectorErrors(
 
 /**
  * Main auto-fix workflow
+ * Can be called with specific failed domains or will test common failure cases
  */
-export async function runAutoFixWorkflow(): Promise<void> {
+export async function runAutoFixWorkflow(failedDomains?: Array<{ domain: string; error: string }>): Promise<void> {
   console.log('🚀 Starting Auto-Fix Agent Workflow...\n');
 
-  // Test domains that commonly fail
-  const testDomains = ['iambrandluxury.com', 'example.com'];
+  let errors: Array<{ domain: string; error: string }>;
   
-  console.log(`Testing ${testDomains.length} domains for errors...`);
-  const results = await scrapeTrafficData(testDomains, false);
-
-  // Detect errors
-  const errors = detectErrors(results);
+  if (failedDomains && failedDomains.length > 0) {
+    // Use provided failed domains
+    errors = failedDomains.filter(e => e.error.toLowerCase().includes('selector'));
+    console.log(`Processing ${errors.length} selector error(s) from QA Agent...`);
+  } else {
+    // Test domains that commonly fail
+    const testDomains = ['iambrandluxury.com', 'example.com'];
+    console.log(`Testing ${testDomains.length} domains for errors...`);
+    const results = await scrapeTrafficData(testDomains, false);
+    errors = detectErrors(results);
+  }
   
   if (errors.length === 0) {
     console.log('✅ No selector errors detected. System is healthy!');
