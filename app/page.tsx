@@ -81,7 +81,7 @@ export default function Home() {
       if (cacheMisses > 0) {
         setProgress(`Showing ${cacheHits} cached results. Scraping ${cacheMisses} domains in background...`);
         
-        const MAX_POLL_TIME = 120000; // 2 minutes max
+        const MAX_POLL_TIME = 60000; // 1 minute max
         const POLL_INTERVAL = 2000; // Poll every 2 seconds
         const startTime = Date.now();
         let pollCount = 0;

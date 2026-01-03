@@ -308,18 +308,57 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // For cache misses, create placeholder results with error status
-    // These will be updated in background
-    const placeholderResults: TrafficData[] = cacheMisses.map(domain => ({
-      domain,
-      monthlyVisits: null,
-      avgSessionDuration: null,
-      avgSessionDurationSeconds: null,
-      bounceRate: null,
-      pagesPerVisit: null,
-      checkedAt: null,
-      error: 'Scraping in background...',
-    }));
+    // For cache misses, try quick scrape first (for "No valid data" cases)
+    // Only create placeholders if quick scrape doesn't work
+    const placeholderResults: TrafficData[] = [];
+    const domainsNeedingBackgroundScrape: string[] = [];
+    
+    // Quick scrape check for cache misses (detects "No valid data" immediately)
+    if (cacheMisses.length > 0) {
+      try {
+        const quickResults = await scrapeTrafficData(cacheMisses.slice(0, 10), false); // Max 10 at a time
+        for (const result of quickResults) {
+          if (result.error === null && result.monthlyVisits === 0) {
+            // Quick detection worked - no background scraping needed
+            placeholderResults.push(result);
+          } else if (result.error === null) {
+            // Got valid data - no background scraping needed
+            placeholderResults.push(result);
+            // Store in database
+            storeTrafficData(result);
+          } else {
+            // Still needs background scraping
+            domainsNeedingBackgroundScrape.push(result.domain);
+            placeholderResults.push({
+              domain: result.domain,
+              monthlyVisits: null,
+              avgSessionDuration: null,
+              avgSessionDurationSeconds: null,
+              bounceRate: null,
+              pagesPerVisit: null,
+              checkedAt: null,
+              error: 'Scraping in background...',
+            });
+          }
+        }
+      } catch (error) {
+        // If quick scrape fails, fall back to background scraping
+        console.error('Quick scrape failed, falling back to background:', error);
+        for (const domain of cacheMisses) {
+          domainsNeedingBackgroundScrape.push(domain);
+          placeholderResults.push({
+            domain,
+            monthlyVisits: null,
+            avgSessionDuration: null,
+            avgSessionDurationSeconds: null,
+            bounceRate: null,
+            pagesPerVisit: null,
+            checkedAt: null,
+            error: 'Scraping in background...',
+          });
+        }
+      }
+    }
 
     // Combine cached + placeholders
     const immediateResults = [...cachedResults, ...placeholderResults];
@@ -337,10 +376,10 @@ export async function POST(request: NextRequest) {
       return orderA - orderB;
     });
 
-    // Start background scraping for cache misses (non-blocking)
-    if (cacheMisses.length > 0) {
+    // Start background scraping only for domains that need it (non-blocking)
+    if (domainsNeedingBackgroundScrape.length > 0) {
       // Don't await - let it run in background
-      scrapeInBackground(cacheMisses, domainOrderMap, originalDomainMap).catch(err => {
+      scrapeInBackground(domainsNeedingBackgroundScrape, domainOrderMap, originalDomainMap).catch(err => {
         console.error('[Background] Failed to start background scraping:', err);
       });
     }
