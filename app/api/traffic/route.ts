@@ -261,7 +261,8 @@ export async function POST(request: NextRequest) {
       cached = new Map<string, TrafficData>();
       for (const [domain, data] of dbCached.entries()) {
         // Check if data is fresh (isDataFresh handles www. variations internally)
-        if (isDataFresh(data.domain || domain, 30)) {
+        // Also accept 0 traffic results (they're valid and don't need re-scraping)
+        if (isDataFresh(data.domain || domain, 30) || data.monthlyVisits === 0) {
           cached.set(domain, data);
         }
       }
@@ -314,6 +315,7 @@ export async function POST(request: NextRequest) {
     const domainsNeedingBackgroundScrape: string[] = [];
     
     // Quick scrape check for cache misses (detects "No valid data" immediately)
+    // This runs synchronously to avoid "Scraping in background..." for "No valid data" cases
     if (cacheMisses.length > 0) {
       try {
         // Process in batches of 10 (traffic.cv limit)
@@ -321,13 +323,14 @@ export async function POST(request: NextRequest) {
         for (const batch of batches) {
           const quickResults = await scrapeTrafficData(batch, false);
           for (const result of quickResults) {
+            // If error is null, we got a result (0 traffic or valid data) - no background scraping needed
             if (result.error === null) {
-              // Got result (either 0 traffic or valid data) - no background scraping needed
               placeholderResults.push(result);
-              // Store in database (including 0 traffic results)
+              // Store in database immediately (including 0 traffic results)
               storeTrafficData(result);
             } else {
-              // Still needs background scraping (only if there's an actual error)
+              // Only use background scraping if there's an actual scraping error
+              // (not for "No valid data" cases which should return error: null, monthlyVisits: 0)
               domainsNeedingBackgroundScrape.push(result.domain);
               placeholderResults.push({
                 domain: result.domain,

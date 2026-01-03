@@ -87,11 +87,17 @@ export async function scrapeTrafficData(
     
     // Quick check for "No valid data" or "Unregistered domain" messages
     // These should be detected early to avoid unnecessary waiting
+    // Wait a tiny bit for page to render, then check immediately
+    await page.waitForTimeout(500); // Minimal wait for page content
     const quickCheckText = await page.textContent('body').catch(() => '');
-    const hasNoDataMessage = quickCheckText?.toLowerCase().includes('no valid data') ||
-                             quickCheckText?.toLowerCase().includes('unregistered domain') ||
-                             quickCheckText?.toLowerCase().includes('not registered') ||
-                             quickCheckText?.toLowerCase().includes('data is unavailable');
+    const pageHTML = await page.content().catch(() => '');
+    const allText = (quickCheckText + ' ' + pageHTML).toLowerCase();
+    
+    const hasNoDataMessage = allText.includes('no valid data') ||
+                             allText.includes('unregistered domain') ||
+                             allText.includes('not registered') ||
+                             allText.includes('data is unavailable') ||
+                             allText.includes('this domain is not registered');
     
     if (hasNoDataMessage) {
       console.log(`Quick detection: Domain(s) show "No valid data" - returning early`);
@@ -108,7 +114,7 @@ export async function scrapeTrafficData(
         checkedAt: new Date().toISOString(),
         error: null, // Not an error - just no data available
       }));
-    } // Reduced from 30s to 15s
+    }
 
     // Optimize: Wait for results with shorter timeout
     let resultsFound = false;
