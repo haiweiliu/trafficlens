@@ -167,7 +167,7 @@ async function scrapeInBackground(
     // Retry failed domains in background
     const failedDomains = allResults
       .filter(r => r.error)
-      .map(r => ({ domain: r.domain, error: r.error! }));
+      .map(r => r.domain);
     
     if (failedDomains.length > 0) {
       console.log(`[Background] Retrying ${failedDomains.length} failed domains...`);
