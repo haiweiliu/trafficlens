@@ -26,7 +26,8 @@
     "performance:monitor": "tsx scripts/performance-monitoring-agent.ts",
     "cache:validate": "tsx scripts/cache-validation-agent.ts",
     "deploy:verify": "tsx scripts/deployment-verification-agent.ts",
-    "domain:test": "tsx scripts/domain-normalization-agent.ts"
+    "domain:test": "tsx scripts/domain-normalization-agent.ts",
+    "pre-deploy": "tsx scripts/pre-deployment-agent.ts"
   },
   "keywords": [],
   "author": "",

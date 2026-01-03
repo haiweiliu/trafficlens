@@ -136,7 +136,20 @@ This directory contains documentation for all automated agents in the TrafficLen
 - Tests Playwright browser availability
 - Blocks deployment if tests fail
 
-#### 11. Domain Normalization Agent
+#### 11. Pre-Deployment Validation Agent
+**Purpose:** Catch build errors before Railway deployment  
+**File:** `scripts/pre-deployment-agent.ts`  
+**Documentation:** [PRE_DEPLOYMENT_AGENT.md](./PRE_DEPLOYMENT_AGENT.md)  
+**Command:** `npm run pre-deploy`
+
+- Validates TypeScript compilation
+- Tests Next.js build
+- Checks exports and imports
+- Validates Map vs Array usage
+- Catches common deployment errors
+- Prevents failed Railway deployments
+
+#### 12. Domain Normalization Agent
 **Purpose:** Comprehensive domain testing  
 **File:** `scripts/domain-normalization-agent.ts`  
 **Documentation:** [DOMAIN_NORMALIZATION_AGENT.md](./DOMAIN_NORMALIZATION_AGENT.md)  
@@ -171,6 +184,7 @@ npm run performance:monitor 7d # Last 7 days
 npm run cache:validate        # Cache Validation Agent
 npm run deploy:verify         # Deployment Verification Agent
 npm run domain:test           # Domain Normalization Agent
+npm run pre-deploy            # Pre-Deployment Validation Agent (run before push!)
 ```
 
 ### Automated Execution
