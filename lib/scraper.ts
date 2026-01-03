@@ -83,7 +83,32 @@ export async function scrapeTrafficData(
 
     // Navigate to the bulk checker page
     console.log(`Navigating to: ${url}`);
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 }); // Reduced from 30s to 15s
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    
+    // Quick check for "No valid data" or "Unregistered domain" messages
+    // These should be detected early to avoid unnecessary waiting
+    const quickCheckText = await page.textContent('body').catch(() => '');
+    const hasNoDataMessage = quickCheckText?.toLowerCase().includes('no valid data') ||
+                             quickCheckText?.toLowerCase().includes('unregistered domain') ||
+                             quickCheckText?.toLowerCase().includes('not registered') ||
+                             quickCheckText?.toLowerCase().includes('data is unavailable');
+    
+    if (hasNoDataMessage) {
+      console.log(`Quick detection: Domain(s) show "No valid data" - returning early`);
+      await browser.close();
+      
+      // Return results with 0 traffic for all domains (not an error - just no data)
+      return domains.map(domain => ({
+        domain,
+        monthlyVisits: 0,
+        avgSessionDuration: null,
+        avgSessionDurationSeconds: null,
+        bounceRate: null,
+        pagesPerVisit: null,
+        checkedAt: new Date().toISOString(),
+        error: null, // Not an error - just no data available
+      }));
+    } // Reduced from 30s to 15s
 
     // Optimize: Wait for results with shorter timeout
     let resultsFound = false;
