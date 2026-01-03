@@ -37,7 +37,7 @@ export default function Home() {
     }
 
     setLoading(true);
-    setProgress('Starting...');
+    setProgress('Loading cached results...');
     setResults([]);
 
     try {
@@ -51,17 +51,14 @@ export default function Home() {
         return;
       }
 
-      // Send all domains at once - backend handles parallel batching
-      const batches = Math.ceil(domainsToCheck.length / 10);
-      setProgress(`Processing ${domainsToCheck.length} domains in ${batches} batches (${Math.min(3, batches)} parallel)...`);
-
+      // Send all domains at once - backend returns cached immediately, scrapes missing in background
       const response = await fetch('/api/traffic', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          domains: domainsToCheck, // Send all domains at once
+          domains: domainsToCheck,
           dryRun,
           bypassCache,
         }),
@@ -73,13 +70,67 @@ export default function Home() {
       }
 
       const data: TrafficResponse = await response.json();
+      
+      // Show cached results immediately
       setResults(data.results);
-      setProgress(`Completed! Processed ${data.results.length} domains (${data.metadata.batchesProcessed} batches)`);
+      
+      const cacheHits = data.metadata.cacheHits;
+      const cacheMisses = data.metadata.cacheMisses;
+      
+      if (cacheMisses > 0) {
+        setProgress(`Showing ${cacheHits} cached results. Scraping ${cacheMisses} domains in background...`);
+        
+        // Poll for updates every 2 seconds
+        const pollInterval = setInterval(async () => {
+          try {
+            const updateResponse = await fetch(`/api/traffic/update?domains=${domainsToCheck.join(',')}`);
+            if (updateResponse.ok) {
+              const updateData = await updateResponse.json();
+              
+              // Merge updated results
+              const updatedMap = new Map(updateData.results.map((r: TrafficData) => [r.domain, r]));
+              const mergedResults = data.results.map((result: TrafficData) => {
+                const updated = updatedMap.get(result.domain);
+                if (updated && !updated.error?.includes('Still scraping')) {
+                  return updated;
+                }
+                return result;
+              });
+              
+              setResults(mergedResults);
+              
+              // Check if all done
+              const stillScraping = mergedResults.some(r => r.error?.includes('Still scraping') || r.error?.includes('Scraping in background'));
+              if (!stillScraping) {
+                clearInterval(pollInterval);
+                setProgress(`Completed! ${cacheHits} from cache, ${cacheMisses} scraped.`);
+                setLoading(false);
+                setTimeout(() => setProgress(''), 3000);
+              }
+            }
+          } catch (error) {
+            console.error('Polling error:', error);
+          }
+        }, 2000);
+        
+        // Stop polling after 2 minutes
+        setTimeout(() => {
+          clearInterval(pollInterval);
+          if (loading) {
+            setLoading(false);
+            setProgress('Background scraping may still be in progress. Refresh to see updates.');
+            setTimeout(() => setProgress(''), 5000);
+          }
+        }, 120000);
+      } else {
+        setProgress(`All ${cacheHits} results from cache!`);
+        setLoading(false);
+        setTimeout(() => setProgress(''), 3000);
+      }
     } catch (error) {
       console.error('Error:', error);
       alert(error instanceof Error ? error.message : 'An error occurred');
       setProgress('Error occurred');
-    } finally {
       setLoading(false);
       setTimeout(() => setProgress(''), 3000);
     }

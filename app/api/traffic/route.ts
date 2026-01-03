@@ -1,6 +1,8 @@
 /**
  * API route for bulk traffic checking
  * POST /api/traffic
+ * 
+ * Returns cached results immediately, then scrapes missing domains in background
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -36,39 +38,27 @@ interface TrafficResponse {
     cacheHits: number;
     cacheMisses: number;
     errors: string[];
+    backgroundScraping?: boolean; // Indicates if background scraping is happening
   };
 }
 
 /**
  * Rate limiting: delay between batches (in milliseconds)
  */
-const BATCH_DELAY_MS = 2000; // 2 seconds between batches (optimized for speed)
+const BATCH_DELAY_MS = 2000;
 
 /**
- * Parallel processing: how many batches to process simultaneously
- * 
- * Resource usage per batch:
- * - Memory: ~150-300 MB per browser instance
- * - CPU: Moderate (single-threaded JS, but parallel processes)
- * 
- * Recommended values:
- * - 5: Maximum speed (50 domains simultaneously), requires 2-3 GB RAM, 2-4 vCPU (Railway, Vercel Pro)
- * - 3: Good balance, requires 1-2 GB RAM, 2 vCPU (Vercel Pro, Railway)
- * - 2: Conservative, requires 600-800 MB RAM, 1-2 vCPU (Railway, Render)
- * - 1: Sequential (slowest), requires 300-400 MB RAM, 1 vCPU (Free tiers)
+ * Number of parallel batches to process
  */
-const PARALLEL_BATCHES = 5; // Process 5 batches at a time (50 domains simultaneously) - optimized for speed
+const PARALLEL_BATCHES = 5;
 
-/**
- * Sleep utility for rate limiting
- */
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 interface BatchResult {
   success: boolean;
-  results?: TrafficData[];
+  results: TrafficData[];
   error?: string;
 }
 
@@ -108,6 +98,86 @@ async function processBatchesInParallel<T>(
   }
   
   return results;
+}
+
+/**
+ * Background scraping function (doesn't block response)
+ */
+async function scrapeInBackground(
+  cacheMisses: string[],
+  domainOrderMap: Map<string, number>,
+  originalDomainMap: Map<string, string>
+): Promise<void> {
+  try {
+    if (cacheMisses.length === 0) return;
+
+    console.log(`[Background] Starting scrape for ${cacheMisses.length} domains...`);
+    
+    // Split into batches of 10 (Traffic.cv limit)
+    const batches = chunkArray(cacheMisses, 10);
+    const allResults: TrafficData[] = [];
+
+    const batchProcessor = async (batch: string[], batchIndex: number) => {
+      console.log(`[Background] Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} domains)`);
+      try {
+        const batchResults = await scrapeTrafficData(batch, false);
+        
+        // Store results in database
+        for (const result of batchResults) {
+          if (!result.error) {
+            // Store current month data
+            storeTrafficData(result);
+            
+            // Store historical months if available
+            if ('historicalMonths' in result && result.historicalMonths) {
+              storeHistoricalTrafficData(result.domain, result.historicalMonths, result);
+            }
+          }
+        }
+        
+        return {
+          success: true,
+          results: batchResults,
+        };
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        console.error(`[Background] Batch ${batchIndex + 1} error:`, errorMsg);
+        return {
+          success: false,
+          error: errorMsg,
+          results: [],
+        };
+      }
+    };
+
+    // Process batches in parallel
+    const parallelResults = await processBatchesInParallel(
+      batches,
+      batchProcessor,
+      PARALLEL_BATCHES
+    );
+
+    // Collect all results
+    for (const result of parallelResults) {
+      if (result.results) {
+        allResults.push(...result.results);
+      }
+    }
+
+    // Retry failed domains in background
+    const failedDomains = allResults
+      .filter(r => r.error)
+      .map(r => ({ domain: r.domain, error: r.error! }));
+    
+    if (failedDomains.length > 0) {
+      console.log(`[Background] Retrying ${failedDomains.length} failed domains...`);
+      backgroundRetryFailedDomains(failedDomains);
+    }
+
+    console.log(`[Background] Completed scraping ${allResults.length} domains`);
+  } catch (error) {
+    console.error('[Background] Scraping error:', error);
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -152,6 +222,31 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // DRY RUN: Return mock data immediately
+    if (dryRun) {
+      const mockResults: TrafficData[] = domains.map((domain, index) => ({
+        domain,
+        monthlyVisits: Math.floor(Math.random() * 1000000),
+        avgSessionDuration: '00:02:30',
+        avgSessionDurationSeconds: 150,
+        bounceRate: Math.random() * 100,
+        pagesPerVisit: Math.random() * 5 + 1,
+        checkedAt: new Date().toISOString(),
+        error: null,
+      }));
+
+      return NextResponse.json({
+        results: mockResults,
+        metadata: {
+          totalDomains: domains.length,
+          batchesProcessed: 0,
+          cacheHits: 0,
+          cacheMisses: domains.length,
+          errors: [],
+        },
+      });
+    }
+
     // Check database first (monthly cache - SimilarWeb updates by 10th of following month)
     let cached: Map<string, TrafficData>;
     if (bypassCache) {
@@ -192,135 +287,8 @@ export async function POST(request: NextRequest) {
     const cacheHits = cached.size;
     const cacheMisses = domains.filter(d => !cached.has(d));
 
-    // Split into batches of 10 (Traffic.cv limit)
-    const batches = chunkArray(cacheMisses, 10);
-    const allResults: TrafficData[] = [];
-    const errors: string[] = [];
-
-    // Process batches in parallel (3 at a time)
-    const batchProcessor = async (batch: string[], batchIndex: number) => {
-      console.log(`Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} domains)`);
-
-      try {
-        // Scrape this batch with retry logic (runs in parallel with other batches)
-        const batchResults = await retryScrapeTrafficData(batch, {
-          maxRetries: 2,
-          initialDelay: 8000, // 8 seconds initial wait
-          maxDelay: 30000, // 30 seconds max
-          backoffMultiplier: 1.5,
-        });
-
-        // Ensure we have results for all domains in the batch
-        const foundDomains = new Set(batchResults.map(r => r.domain.toLowerCase().replace(/^www\./, '')));
-        const missingDomains = batch.filter(d => {
-          const dNorm = d.toLowerCase().replace(/^www\./, '');
-          return !foundDomains.has(dNorm);
-        });
-
-        // Store results in database and in-memory cache
-        for (const result of batchResults) {
-          if (!result.error) {
-            const historicalMonths = (result as any).historicalMonths;
-            
-            const resultWithTimestamp: TrafficData = {
-              ...result,
-              checkedAt: result.checkedAt || new Date().toISOString(),
-            };
-            
-            // Store current month's data in database
-            storeTrafficData(resultWithTimestamp);
-            
-            // Store historical months data if available (from "Visits Over Time" graph)
-            if (historicalMonths && Array.isArray(historicalMonths) && historicalMonths.length > 0) {
-              storeHistoricalTrafficData(
-                result.domain,
-                historicalMonths,
-                resultWithTimestamp
-              );
-            }
-            
-            // Also keep in-memory cache for quick access
-            trafficCache.set(result.domain, resultWithTimestamp);
-            
-            // Update the result object for the batch
-            result.checkedAt = resultWithTimestamp.checkedAt;
-          }
-        }
-
-        // Add timestamp to batch results
-        const timestamp = new Date().toISOString();
-        const batchResultsWithTimestamp: TrafficData[] = batchResults.map(r => ({
-          ...r,
-          checkedAt: r.checkedAt || timestamp,
-        }));
-
-        // Add results for missing domains (will be retried in background)
-        const missingResults: TrafficData[] = missingDomains.map(domain => ({
-          domain,
-          monthlyVisits: null,
-          avgSessionDuration: null,
-          avgSessionDurationSeconds: null,
-          bounceRate: null,
-          pagesPerVisit: null,
-          checkedAt: timestamp,
-          error: 'Retrying in background...', // Temporary - will be updated
-        }));
-        
-        // Start background retry for missing domains
-        if (missingDomains.length > 0 && !dryRun) {
-          backgroundRetryFailedDomains(missingDomains, (retryResults) => {
-            console.log(`Background retry completed for ${retryResults.length} domains`);
-            // Results will be stored in database by backgroundRetryFailedDomains
-          });
-        }
-
-        return {
-          success: true,
-          results: [...batchResultsWithTimestamp, ...missingResults],
-        };
-      } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-        
-        // Add error results for this batch to ensure all domains are accounted for
-        const timestamp = new Date().toISOString();
-        const errorResults: TrafficData[] = batch.map(domain => ({
-          domain,
-          monthlyVisits: null,
-          avgSessionDuration: null,
-          avgSessionDurationSeconds: null,
-          bounceRate: null,
-          pagesPerVisit: null,
-          checkedAt: timestamp,
-          error: errorMsg,
-        }));
-
-        return {
-          success: false,
-          error: errorMsg,
-          results: errorResults,
-        };
-      }
-    };
-
-    // Process batches in parallel chunks
-    const parallelResults = await processBatchesInParallel(
-      batches,
-      batchProcessor,
-      PARALLEL_BATCHES
-    );
-
-    // Collect all results
-    for (const result of parallelResults) {
-      if (result.results) {
-        allResults.push(...result.results);
-      }
-      if (result.error && !result.success) {
-        errors.push(result.error);
-      }
-    }
-
-    // Add cached results (preserve original checkedAt from database)
-    // The checkedAt shows when data was originally scraped (could be up to 30 days ago)
+    // Prepare cached results for immediate return
+    const cachedResults: TrafficData[] = [];
     for (const [domain, data] of cached.entries()) {
       // Ensure avgSessionDuration is formatted if we have seconds but no formatted string
       let formattedDuration = data.avgSessionDuration;
@@ -333,18 +301,31 @@ export async function POST(request: NextRequest) {
         formattedDuration = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
       }
       
-      allResults.push({
+      cachedResults.push({
         ...data,
         avgSessionDuration: formattedDuration,
-        // Preserve original checkedAt from database (when data was scraped)
-        // This is correct - it shows the last scrape time, not current time
         checkedAt: data.checkedAt,
       });
     }
 
+    // For cache misses, create placeholder results with error status
+    // These will be updated in background
+    const placeholderResults: TrafficData[] = cacheMisses.map(domain => ({
+      domain,
+      monthlyVisits: null,
+      avgSessionDuration: null,
+      avgSessionDurationSeconds: null,
+      bounceRate: null,
+      pagesPerVisit: null,
+      checkedAt: null,
+      error: 'Scraping in background...',
+    }));
+
+    // Combine cached + placeholders
+    const immediateResults = [...cachedResults, ...placeholderResults];
+
     // Sort results to match original domain order (preserves Google Sheet/CSV order)
-    // Use normalized domain matching to handle www. variations
-    allResults.sort((a, b) => {
+    immediateResults.sort((a, b) => {
       // Normalize result domains for matching
       const aNorm = a.domain.toLowerCase().trim().replace(/^www\./, '');
       const bNorm = b.domain.toLowerCase().trim().replace(/^www\./, '');
@@ -356,26 +337,23 @@ export async function POST(request: NextRequest) {
       return orderA - orderB;
     });
 
-    // Add timestamp to all results
-    const finalTimestamp = new Date().toISOString();
-    const resultsWithTimestamp = allResults.map(result => ({
-      ...result,
-      checkedAt: result.checkedAt || finalTimestamp,
-    }));
+    // Start background scraping for cache misses (non-blocking)
+    if (cacheMisses.length > 0) {
+      // Don't await - let it run in background
+      scrapeInBackground(cacheMisses, domainOrderMap, originalDomainMap).catch(err => {
+        console.error('[Background] Failed to start background scraping:', err);
+      });
+    }
 
-    // Calculate total visits (sum of all monthly visits)
-    const totalVisits = resultsWithTimestamp
-      .filter(r => r.monthlyVisits !== null && r.monthlyVisits !== undefined)
-      .reduce((sum, r) => sum + (r.monthlyVisits || 0), 0);
-
-    // Count errors
-    const errorCount = resultsWithTimestamp.filter(r => r.error).length;
-
-    // Log usage statistics
+    // Log usage statistics (only for cached results for now)
     try {
+      const totalVisits = cachedResults
+        .filter(r => r.monthlyVisits !== null && r.monthlyVisits !== undefined)
+        .reduce((sum, r) => sum + (r.monthlyVisits || 0), 0);
+
       logUsage({
         rowsProcessed: domains.length,
-        errors: errorCount,
+        errors: 0, // Will be updated when background scraping completes
         totalVisits,
         cacheHits,
         cacheMisses: cacheMisses.length,
@@ -385,14 +363,16 @@ export async function POST(request: NextRequest) {
       console.error('Failed to log usage:', error);
     }
 
+    // Return immediate results (cached + placeholders)
     const response: TrafficResponse = {
-      results: resultsWithTimestamp,
+      results: immediateResults,
       metadata: {
         totalDomains: domains.length,
-        batchesProcessed: batches.length,
+        batchesProcessed: Math.ceil(cacheMisses.length / 10),
         cacheHits,
         cacheMisses: cacheMisses.length,
-        errors,
+        errors: [],
+        backgroundScraping: cacheMisses.length > 0,
       },
     };
 
@@ -405,4 +385,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

@@ -263,23 +263,46 @@ export async function scrapeTrafficData(
       
       // Check if missing domains appear on page but have 0 traffic
       const pageText = await page.textContent('body') || '';
+      const pageHTML = await page.content();
+      
       for (const domain of missingDomains) {
         const domainNorm = domain.toLowerCase().replace(/^www\./, '');
+        const domainVariations = [
+          domainNorm,
+          `www.${domainNorm}`,
+          domain.toLowerCase(),
+          domain,
+        ];
+        
         // Check if domain appears on page (might have 0 traffic)
-        const domainOnPage = pageText.toLowerCase().includes(domainNorm);
+        let domainOnPage = false;
+        for (const variation of domainVariations) {
+          if (pageText.toLowerCase().includes(variation.toLowerCase()) || 
+              pageHTML.toLowerCase().includes(variation.toLowerCase())) {
+            domainOnPage = true;
+            break;
+          }
+        }
         
         if (domainOnPage) {
           // Domain found but no metrics - likely 0 traffic (not an error)
-          cardResults.push({
-            domain,
-            monthlyVisits: 0, // Explicitly 0, not null
-            avgSessionDuration: null,
-            avgSessionDurationSeconds: null,
-            bounceRate: null,
-            pagesPerVisit: null,
-            checkedAt: null,
-            error: null, // No error - site has 0 traffic
-          });
+          // Try one more time with longer wait
+          await page.waitForTimeout(2000);
+          const retryResults = await extractFromCards(page, [domain]);
+          if (retryResults.length > 0 && !retryResults[0].error) {
+            cardResults.push(retryResults[0]);
+          } else {
+            cardResults.push({
+              domain,
+              monthlyVisits: 0, // Explicitly 0, not null
+              avgSessionDuration: null,
+              avgSessionDurationSeconds: null,
+              bounceRate: null,
+              pagesPerVisit: null,
+              checkedAt: null,
+              error: null, // No error - site has 0 traffic
+            });
+          }
         } else {
           // Domain truly not found - this is an error
           cardResults.push({
@@ -290,7 +313,7 @@ export async function scrapeTrafficData(
             bounceRate: null,
             pagesPerVisit: null,
             checkedAt: null,
-            error: 'Domain not found in results',
+            error: 'No data found on page (selectors may need update)',
           });
         }
       }
