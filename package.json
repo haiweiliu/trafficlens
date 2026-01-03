@@ -15,7 +15,8 @@
     "lint": "next lint",
     "test": "echo \"Error: no test specified\" && exit 1",
     "qa": "tsx scripts/qa-agent.ts",
-    "qa:daily": "bash scripts/run-qa.sh"
+    "qa:daily": "bash scripts/run-qa.sh",
+    "usage:report": "tsx scripts/usage-agent.ts"
   },
   "keywords": [],
   "author": "",
@@ -27,6 +28,7 @@
     "autoprefixer": "^10.4.23",
     "better-sqlite3": "^11.10.0",
     "next": "^16.1.1",
+    "nodemailer": "^7.0.12",
     "playwright": "^1.57.0",
     "postcss": "^8.5.6",
     "react": "^19.2.3",
@@ -36,6 +38,7 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
+    "@types/nodemailer": "^7.0.4",
     "tsx": "^4.21.0"
   }
 }

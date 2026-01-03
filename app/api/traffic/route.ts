@@ -17,6 +17,7 @@ import {
   calculateTrends,
   getCurrentMonth
 } from '@/lib/db';
+import { logUsage } from '@/lib/usage-tracker';
 
 export const maxDuration = 300; // 5 minutes for Vercel
 
@@ -347,6 +348,28 @@ export async function POST(request: NextRequest) {
       ...result,
       checkedAt: result.checkedAt || finalTimestamp,
     }));
+
+    // Calculate total visits (sum of all monthly visits)
+    const totalVisits = resultsWithTimestamp
+      .filter(r => r.monthlyVisits !== null && r.monthlyVisits !== undefined)
+      .reduce((sum, r) => sum + (r.monthlyVisits || 0), 0);
+
+    // Count errors
+    const errorCount = resultsWithTimestamp.filter(r => r.error).length;
+
+    // Log usage statistics
+    try {
+      logUsage({
+        rowsProcessed: domains.length,
+        errors: errorCount,
+        totalVisits,
+        cacheHits,
+        cacheMisses: cacheMisses.length,
+      });
+    } catch (error) {
+      // Don't fail the request if usage logging fails
+      console.error('Failed to log usage:', error);
+    }
 
     const response: TrafficResponse = {
       results: resultsWithTimestamp,

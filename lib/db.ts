@@ -98,6 +98,21 @@ function initializeSchema(database: Database.Database) {
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS usage_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date DATE NOT NULL,
+      total_rows INTEGER NOT NULL DEFAULT 0,
+      total_errors INTEGER NOT NULL DEFAULT 0,
+      total_visits BIGINT NOT NULL DEFAULT 0,
+      cache_hits INTEGER NOT NULL DEFAULT 0,
+      cache_misses INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(date)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_usage_date ON usage_logs(date);
+
     INSERT OR IGNORE INTO data_metadata (key, value) VALUES 
       ('last_similarweb_update', '2025-01-01'),
       ('cache_ttl_days', '30'),

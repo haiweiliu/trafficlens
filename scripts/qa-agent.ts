@@ -7,6 +7,7 @@ import { scrapeTrafficData } from '../lib/scraper';
 import { getLatestTrafficDataBatch, isDataFresh } from '../lib/db';
 import { normalizeDomains } from '../lib/domain-utils';
 import { TrafficData } from '../types';
+import { sendQAErrorEmail } from '../lib/email';
 
 interface QAResult {
   testName: string;
@@ -353,6 +354,17 @@ export async function runQATests(): Promise<QAReport> {
   console.log(`Passed: ${report.passed}`);
   console.log(`Failed: ${report.failed}`);
   console.log(`Auto-fixed: ${report.fixed}`);
+  
+  // Send email notification if there are errors
+  if (report.failed > 0) {
+    console.log('\n📧 Sending error notification email...');
+    const emailSent = await sendQAErrorEmail(report);
+    if (emailSent) {
+      console.log('✅ Error notification email sent');
+    } else {
+      console.log('⚠️ Failed to send error notification email (check email configuration)');
+    }
+  }
   
   return report;
 }
