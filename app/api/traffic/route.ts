@@ -316,29 +316,30 @@ export async function POST(request: NextRequest) {
     // Quick scrape check for cache misses (detects "No valid data" immediately)
     if (cacheMisses.length > 0) {
       try {
-        const quickResults = await scrapeTrafficData(cacheMisses.slice(0, 10), false); // Max 10 at a time
-        for (const result of quickResults) {
-          if (result.error === null && result.monthlyVisits === 0) {
-            // Quick detection worked - no background scraping needed
-            placeholderResults.push(result);
-          } else if (result.error === null) {
-            // Got valid data - no background scraping needed
-            placeholderResults.push(result);
-            // Store in database
-            storeTrafficData(result);
-          } else {
-            // Still needs background scraping
-            domainsNeedingBackgroundScrape.push(result.domain);
-            placeholderResults.push({
-              domain: result.domain,
-              monthlyVisits: null,
-              avgSessionDuration: null,
-              avgSessionDurationSeconds: null,
-              bounceRate: null,
-              pagesPerVisit: null,
-              checkedAt: null,
-              error: 'Scraping in background...',
-            });
+        // Process in batches of 10 (traffic.cv limit)
+        const batches = chunkArray(cacheMisses, 10);
+        for (const batch of batches) {
+          const quickResults = await scrapeTrafficData(batch, false);
+          for (const result of quickResults) {
+            if (result.error === null) {
+              // Got result (either 0 traffic or valid data) - no background scraping needed
+              placeholderResults.push(result);
+              // Store in database (including 0 traffic results)
+              storeTrafficData(result);
+            } else {
+              // Still needs background scraping (only if there's an actual error)
+              domainsNeedingBackgroundScrape.push(result.domain);
+              placeholderResults.push({
+                domain: result.domain,
+                monthlyVisits: null,
+                avgSessionDuration: null,
+                avgSessionDurationSeconds: null,
+                bounceRate: null,
+                pagesPerVisit: null,
+                checkedAt: null,
+                error: 'Scraping in background...',
+              });
+            }
           }
         }
       } catch (error) {
