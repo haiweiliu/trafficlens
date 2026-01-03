@@ -5,7 +5,24 @@
 import { sendQAErrorEmail, sendUsageReportEmail } from '../lib/email';
 
 async function testEmails() {
-  console.log('📧 Testing email functionality...\n');
+  console.log('📧 Testing email functionality with Resend...\n');
+
+  // Check if API key is set
+  if (!process.env.RESEND_API_KEY) {
+    console.log('⚠️  RESEND_API_KEY not set. Setting from command line argument or using default...');
+    // Allow passing API key as argument: npm run test:email -- re_xxxxx
+    const apiKey = process.argv[2];
+    if (apiKey && apiKey.startsWith('re_')) {
+      process.env.RESEND_API_KEY = apiKey;
+      console.log('✅ Using API key from command line argument\n');
+    } else {
+      console.log('❌ Please set RESEND_API_KEY environment variable or pass as argument:');
+      console.log('   npm run test:email -- re_xxxxx');
+      console.log('   or');
+      console.log('   export RESEND_API_KEY=re_xxxxx && npm run test:email\n');
+      return;
+    }
+  }
 
   // Test 1: QA Error Email
   console.log('Test 1: QA Error Email');
@@ -39,9 +56,11 @@ async function testEmails() {
   const usageSent = await sendUsageReportEmail(usageStats);
   console.log(`Usage Report Email: ${usageSent ? '✅ Sent' : '❌ Failed'}\n`);
 
-  if (!qaSent && !usageSent) {
-    console.log('⚠️  Email not configured. Please set EMAIL_USER and EMAIL_PASSWORD environment variables.');
-    console.log('See EMAIL_SETUP.md for instructions.');
+  if (qaSent && usageSent) {
+    console.log('🎉 All test emails sent successfully!');
+    console.log('Check your inbox at mingcomco@gmail.com');
+  } else {
+    console.log('⚠️  Some emails failed. Check the error messages above.');
   }
 }
 

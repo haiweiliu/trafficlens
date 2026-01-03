@@ -1,31 +1,25 @@
 /**
  * Email notification service for QA and usage reports
+ * Uses Resend API (no password needed - API key only)
  */
 
-import * as nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 
-const EMAIL_TO = 'mingcomco@gmail.com';
-const EMAIL_FROM = process.env.EMAIL_FROM || 'noreply@trafficlens.com';
+// Resend free tier: Can only send to account email unless domain is verified
+// To send to other emails, verify a domain at resend.com/domains
+const EMAIL_TO = process.env.EMAIL_TO || 'mingcomco@gmail.com';
+const EMAIL_FROM = process.env.EMAIL_FROM || 'onboarding@resend.dev'; // Resend default, can be changed to your domain
 
-// Configure email transporter
-// For production, use SMTP service (Gmail, SendGrid, etc.)
-// For now, using Gmail SMTP (requires app password)
-function getTransporter() {
-  const emailUser = process.env.EMAIL_USER;
-  const emailPassword = process.env.EMAIL_PASSWORD;
+// Initialize Resend client
+function getResendClient() {
+  const apiKey = process.env.RESEND_API_KEY;
 
-  if (!emailUser || !emailPassword) {
-    console.warn('Email credentials not configured. Email notifications disabled.');
+  if (!apiKey) {
+    console.warn('RESEND_API_KEY not configured. Email notifications disabled.');
     return null;
   }
 
-  return nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: emailUser,
-      pass: emailPassword, // Use App Password, not regular password
-    },
-  });
+  return new Resend(apiKey);
 }
 
 /**
@@ -44,8 +38,8 @@ export async function sendQAErrorEmail(report: {
   totalTests: number;
   results: QATestResult[];
 }): Promise<boolean> {
-  const transporter = getTransporter();
-  if (!transporter) {
+  const resend = getResendClient();
+  if (!resend) {
     console.log('Email not configured - skipping QA error email');
     return false;
   }
@@ -80,7 +74,7 @@ ${errorList}
 Please check the QA reports and logs for more details.
     `;
 
-    await transporter.sendMail({
+    const { data, error } = await resend.emails.send({
       from: EMAIL_FROM,
       to: EMAIL_TO,
       subject: `⚠️ TrafficLens QA: ${report.failed} Test(s) Failed`,
@@ -88,7 +82,17 @@ Please check the QA reports and logs for more details.
       html,
     });
 
-    console.log('QA error email sent successfully');
+    if (error) {
+      console.error('Resend API error:', error);
+      // If error is about recipient restriction, provide helpful message
+      if (error.message?.includes('only send testing emails to your own email')) {
+        console.error('💡 Tip: Resend free tier only allows sending to your account email.');
+        console.error('   To send to other emails, verify a domain at resend.com/domains');
+      }
+      return false;
+    }
+
+    console.log('QA error email sent successfully:', data?.id);
     return true;
   } catch (error) {
     console.error('Failed to send QA error email:', error);
@@ -107,8 +111,8 @@ export async function sendUsageReportEmail(stats: {
   cacheHits: number;
   cacheMisses: number;
 }): Promise<boolean> {
-  const transporter = getTransporter();
-  if (!transporter) {
+  const resend = getResendClient();
+  if (!resend) {
     console.log('Email not configured - skipping usage report email');
     return false;
   }
@@ -145,7 +149,7 @@ Date: ${stats.date}
 Generated automatically by TrafficLens Usage Tracker
     `;
 
-    await transporter.sendMail({
+    const { data, error } = await resend.emails.send({
       from: EMAIL_FROM,
       to: EMAIL_TO,
       subject: `📊 TrafficLens Daily Usage Report - ${stats.date}`,
@@ -153,7 +157,17 @@ Generated automatically by TrafficLens Usage Tracker
       html,
     });
 
-    console.log('Usage report email sent successfully');
+    if (error) {
+      console.error('Resend API error:', error);
+      // If error is about recipient restriction, provide helpful message
+      if (error.message?.includes('only send testing emails to your own email')) {
+        console.error('💡 Tip: Resend free tier only allows sending to your account email.');
+        console.error('   To send to other emails, verify a domain at resend.com/domains');
+      }
+      return false;
+    }
+
+    console.log('Usage report email sent successfully:', data?.id);
     return true;
   } catch (error) {
     console.error('Failed to send usage report email:', error);
