@@ -36,7 +36,7 @@ function analyzeAPIRoutes(): OptimizationIssue[] {
   }
 
   const routeFiles = fs.readdirSync(apiDir, { recursive: true })
-    .filter((file: string) => file.endsWith('route.ts'));
+    .filter((file): file is string => typeof file === 'string' && file.endsWith('route.ts'));
 
   for (const file of routeFiles) {
     const filePath = path.join(apiDir, file);

@@ -37,7 +37,7 @@ function analyzePages(): PageLoadIssue[] {
   }
 
   const pageFiles = fs.readdirSync(pagesDir, { recursive: true })
-    .filter((file: string) => file.endsWith('page.tsx') || file.endsWith('page.ts'));
+    .filter((file): file is string => typeof file === 'string' && (file.endsWith('page.tsx') || file.endsWith('page.ts')));
 
   for (const file of pageFiles) {
     const filePath = path.join(pagesDir, file);
@@ -121,7 +121,7 @@ function analyzeAPIPerformance(): PageLoadIssue[] {
   }
 
   const routeFiles = fs.readdirSync(apiDir, { recursive: true })
-    .filter((file: string) => file.endsWith('route.ts'));
+    .filter((file): file is string => typeof file === 'string' && file.endsWith('route.ts'));
 
   for (const file of routeFiles) {
     const filePath = path.join(apiDir, file);
