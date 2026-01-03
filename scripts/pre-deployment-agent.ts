@@ -495,14 +495,16 @@ export async function runPreDeploymentValidation(): Promise<PreDeploymentReport>
     testPackageJsonValidation(),
     testExportValidation(),
     testMapUsageValidation(),
-    await testTypeScriptCompilation(),
-    await testNextJsBuild(),
-    // Environment verification (merged from Deployment Verification Agent)
-    await testNodeVersion(),
-    await testFileSystemPermissions(),
-    await testDatabaseConnectivity(),
-    await testBrowserAvailability(),
-  ].filter(Boolean) as ValidationTest[];
+    ...(await Promise.all([
+      testTypeScriptCompilation(),
+      testNextJsBuild(),
+      // Environment verification (merged from Deployment Verification Agent)
+      testNodeVersion(),
+      testFileSystemPermissions(),
+      testDatabaseConnectivity(),
+      testBrowserAvailability(),
+    ])),
+  ];
   
   const passed = tests.filter(t => t.passed).length;
   const failed = tests.filter(t => !t.passed).length;
