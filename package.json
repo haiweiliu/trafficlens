@@ -18,7 +18,9 @@
     "qa:daily": "bash scripts/run-qa.sh",
     "usage:report": "tsx scripts/usage-agent.ts",
     "test:email": "tsx scripts/test-email.ts",
-    "auto-fix": "tsx scripts/auto-fix-agent.ts"
+    "auto-fix": "tsx scripts/auto-fix-agent.ts",
+    "code:optimize": "tsx scripts/code-optimization-agent.ts",
+    "page:optimize": "tsx scripts/page-load-optimization-agent.ts"
   },
   "keywords": [],
   "author": "",

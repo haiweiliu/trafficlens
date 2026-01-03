@@ -378,11 +378,29 @@ export async function runQATests(): Promise<QAReport> {
   }
 
   // Send email notification if there are errors
+  // Email scenarios:
+  // 1. Error occurs → notify to fix if needed, if QA agent has fixed or can't fix
   if (report.failed > 0) {
     console.log('\n📧 Sending error notification email...');
-    const emailSent = await sendQAErrorEmail(report);
+    
+    // Check if auto-fix was attempted and succeeded
+    const autoFixedCount = report.results.filter(r => r.fixed).length;
+    const needsManualFix = report.failed - autoFixedCount;
+    
+    const emailSent = await sendQAErrorEmail({
+      ...report,
+      autoFixed: autoFixedCount,
+      needsManualFix,
+    });
+    
     if (emailSent) {
       console.log('✅ Error notification email sent');
+      if (autoFixedCount > 0) {
+        console.log(`   ${autoFixedCount} error(s) were auto-fixed`);
+      }
+      if (needsManualFix > 0) {
+        console.log(`   ${needsManualFix} error(s) require manual attention`);
+      }
     } else {
       console.log('⚠️ Failed to send error notification email (check email configuration)');
     }
