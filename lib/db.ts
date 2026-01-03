@@ -13,7 +13,7 @@ let db: Database.Database | null = null;
 /**
  * Get database connection (singleton)
  */
-function getDb(): Database.Database {
+export function getDb(): Database.Database {
   if (!db) {
     // Use Railway's persistent storage or local data directory
     const dbPath = process.env.DATABASE_PATH || 

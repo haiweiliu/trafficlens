@@ -49,7 +49,7 @@ async function testCacheHitLogic(): Promise<CacheTest> {
     const results = getLatestTrafficDataBatch([cachedDomain.domain]);
     const responseTime = Date.now() - startTime;
     
-    if (results.length === 0 || !results[0]) {
+    if (results.size === 0 || !results.has(cachedDomain.domain)) {
       return {
         name,
         passed: false,
@@ -175,7 +175,7 @@ async function testZeroTrafficCaching(): Promise<CacheTest> {
     // Test that zero traffic results are cached and returned
     const results = getLatestTrafficDataBatch([zeroTrafficDomain.domain]);
     
-    if (results.length === 0 || !results[0]) {
+    if (results.size === 0 || !results.has(zeroTrafficDomain.domain)) {
       return {
         name,
         passed: false,
@@ -184,12 +184,13 @@ async function testZeroTrafficCaching(): Promise<CacheTest> {
       };
     }
     
-    if (results[0].monthlyVisits !== 0) {
+    const result = results.get(zeroTrafficDomain.domain)!;
+    if (result.monthlyVisits !== 0) {
       return {
         name,
         passed: false,
         error: 'Zero traffic domain has non-zero visits',
-        details: { domain: zeroTrafficDomain.domain, visits: results[0].monthlyVisits },
+        details: { domain: zeroTrafficDomain.domain, visits: result.monthlyVisits },
       };
     }
     
@@ -239,18 +240,18 @@ async function testWwwVariations(): Promise<CacheTest> {
     const resultsWithoutWww = getLatestTrafficDataBatch([domainWithoutWww]);
     
     // Both variations should return the same result
-    if (resultsWithWww.length === 0 || resultsWithoutWww.length === 0) {
+    if (resultsWithWww.size === 0 || resultsWithoutWww.size === 0) {
       return {
         name,
         passed: false,
         error: 'Cache lookup failed for www. variation',
-        details: { domain, withWww: resultsWithWww.length > 0, withoutWww: resultsWithoutWww.length > 0 },
+        details: { domain, withWww: resultsWithWww.size > 0, withoutWww: resultsWithoutWww.size > 0 },
       };
     }
     
     // Results should match (same monthly visits)
-    const visitsWithWww = resultsWithWww[0]?.monthlyVisits;
-    const visitsWithoutWww = resultsWithoutWww[0]?.monthlyVisits;
+    const visitsWithWww = resultsWithWww.get(domainWithWww)?.monthlyVisits;
+    const visitsWithoutWww = resultsWithoutWww.get(domainWithoutWww)?.monthlyVisits;
     
     if (visitsWithWww !== visitsWithoutWww) {
       return {
