@@ -88,10 +88,14 @@ export default function Home() {
               const updateData = await updateResponse.json();
               
               // Merge updated results
-              const updatedMap = new Map(updateData.results.map((r: TrafficData) => [r.domain, r]));
+              const updatedMap = new Map<string, TrafficData>(
+                updateData.results.map((r: TrafficData) => [r.domain, r])
+              );
               const mergedResults = data.results.map((result: TrafficData) => {
                 const updated = updatedMap.get(result.domain);
-                if (updated && !updated.error?.includes('Still scraping')) {
+                if (updated && updated.error && !updated.error.includes('Still scraping')) {
+                  return updated;
+                } else if (updated && !updated.error) {
                   return updated;
                 }
                 return result;
