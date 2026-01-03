@@ -1,0 +1,50 @@
+name: Daily QA Tests
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 2 AM UTC daily
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm install
+      
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+      
+      - name: Run QA tests
+        run: npm run qa
+        continue-on-error: true
+      
+      - name: Upload QA reports
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: qa-reports
+          path: qa-reports/
+          retention-days: 30
+      
+      - name: Comment on failure
+        if: failure()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '⚠️ QA tests failed. Check the workflow logs and QA reports artifact.'
+            })
+

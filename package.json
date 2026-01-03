@@ -13,7 +13,9 @@
     "postinstall": "npx playwright install chromium --with-deps",
     "start": "next start",
     "lint": "next lint",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "qa": "tsx scripts/qa-agent.ts",
+    "qa:daily": "bash scripts/run-qa.sh"
   },
   "keywords": [],
   "author": "",
@@ -33,6 +35,7 @@
     "typescript": "^5.9.3"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13"
+    "@types/better-sqlite3": "^7.6.13",
+    "tsx": "^4.21.0"
   }
 }
