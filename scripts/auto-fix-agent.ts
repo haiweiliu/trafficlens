@@ -147,7 +147,7 @@ export async function runAutoFixWorkflow(failedDomains?: Array<{ domain: string;
     await sendQAErrorEmail({
       timestamp: new Date().toISOString(),
       failed: errors.length,
-      totalTests: testDomains.length,
+      totalTests: errors.length,
       results: errors.map(({ domain, error }) => ({
         testName: `Selector Error: ${domain}`,
         passed: false,
