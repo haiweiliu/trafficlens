@@ -5,8 +5,8 @@
 
 import { Resend } from 'resend';
 
-// Resend free tier: Can only send to account email unless domain is verified
-// To send to other emails, verify a domain at resend.com/domains
+// Resend configuration
+// Default recipient: mingcomco@gmail.com
 const EMAIL_TO = process.env.EMAIL_TO || 'mingcomco@gmail.com';
 const EMAIL_FROM = process.env.EMAIL_FROM || 'onboarding@resend.dev'; // Resend default, can be changed to your domain
 
