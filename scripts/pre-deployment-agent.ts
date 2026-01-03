@@ -56,7 +56,7 @@ function testTypeScriptCompilation(): ValidationTest {
 /**
  * Test 2: Next.js Build
  */
-function testNextJsBuild(): ValidationTest {
+async function testNextJsBuild(): Promise<ValidationTest> {
   const name = 'Next.js Build';
   try {
     // Run Next.js build
@@ -319,6 +319,169 @@ function testPackageJsonValidation(): ValidationTest {
 }
 
 /**
+ * Test 7: Node.js Version (from Deployment Verification Agent)
+ */
+async function testNodeVersion(): Promise<ValidationTest> {
+  const name = 'Node.js Version';
+  try {
+    const nodeVersion = process.version;
+    const majorVersion = parseInt(nodeVersion.slice(1).split('.')[0]);
+    
+    if (majorVersion < 20) {
+      return {
+        name,
+        passed: false,
+        error: `Node.js version ${nodeVersion} is too old. Required: >= 20.9.0`,
+        details: { current: nodeVersion, required: '>= 20.9.0' },
+      };
+    }
+    
+    return {
+      name,
+      passed: true,
+      details: { version: nodeVersion },
+    };
+  } catch (error) {
+    return {
+      name,
+      passed: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+/**
+ * Test 8: File System Permissions (from Deployment Verification Agent)
+ */
+async function testFileSystemPermissions(): Promise<ValidationTest> {
+  const name = 'File System Permissions';
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    
+    const testDir = process.env.DATABASE_PATH 
+      ? path.dirname(process.env.DATABASE_PATH)
+      : './data';
+    
+    try {
+      if (!fs.existsSync(testDir)) {
+        fs.mkdirSync(testDir, { recursive: true });
+      }
+      
+      const testFile = path.join(testDir, '.deployment-test');
+      fs.writeFileSync(testFile, 'test');
+      fs.unlinkSync(testFile);
+      
+      return {
+        name,
+        passed: true,
+        details: { testDir },
+      };
+    } catch (fsError) {
+      return {
+        name,
+        passed: false,
+        error: `Cannot write to ${testDir}: ${fsError instanceof Error ? fsError.message : 'Unknown error'}`,
+        details: { testDir },
+      };
+    }
+  } catch (error) {
+    return {
+      name,
+      passed: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+/**
+ * Test 9: Database Connectivity (from Deployment Verification Agent)
+ */
+async function testDatabaseConnectivity(): Promise<ValidationTest> {
+  const name = 'Database Connectivity';
+  try {
+    const { getDb } = await import('../lib/db');
+    const db = getDb();
+    
+    const result = db.prepare('SELECT 1 as test').get() as { test: number };
+    
+    if (!result || result.test !== 1) {
+      return {
+        name,
+        passed: false,
+        error: 'Database query returned unexpected result',
+      };
+    }
+    
+    const tables = db.prepare(`
+      SELECT name FROM sqlite_master 
+      WHERE type='table' AND name IN ('traffic_latest', 'traffic_snapshots')
+    `).all() as Array<{ name: string }>;
+    
+    if (tables.length < 2) {
+      return {
+        name,
+        passed: false,
+        error: `Missing required tables. Found: ${tables.map(t => t.name).join(', ')}`,
+      };
+    }
+    
+    return {
+      name,
+      passed: true,
+      details: { tables: tables.map(t => t.name) },
+    };
+  } catch (error) {
+    return {
+      name,
+      passed: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+/**
+ * Test 10: Browser Availability (from Deployment Verification Agent)
+ */
+async function testBrowserAvailability(): Promise<ValidationTest> {
+  const name = 'Browser Availability (Playwright)';
+  try {
+    const { chromium } = require('playwright');
+    
+    const browser = await chromium.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    });
+    
+    const page = await browser.newPage();
+    await page.goto('https://example.com', { timeout: 10000 });
+    const title = await page.title();
+    await browser.close();
+    
+    if (!title || title.trim() === '') {
+      return {
+        name,
+        passed: false,
+        error: 'Browser launched but failed to load page',
+      };
+    }
+    
+    return {
+      name,
+      passed: true,
+      details: { browserType: 'chromium', testPage: 'example.com' },
+    };
+  } catch (error) {
+    return {
+      name,
+      passed: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+      details: { hint: 'Check if Playwright browsers are installed: npx playwright install chromium' },
+    };
+  }
+}
+
+/**
  * Run all pre-deployment validation tests
  */
 export async function runPreDeploymentValidation(): Promise<PreDeploymentReport> {
@@ -332,8 +495,13 @@ export async function runPreDeploymentValidation(): Promise<PreDeploymentReport>
     testPackageJsonValidation(),
     testExportValidation(),
     testMapUsageValidation(),
-    testTypeScriptCompilation(),
-    testNextJsBuild(),
+    await testTypeScriptCompilation(),
+    await testNextJsBuild(),
+    // Environment verification (merged from Deployment Verification Agent)
+    await testNodeVersion(),
+    await testFileSystemPermissions(),
+    await testDatabaseConnectivity(),
+    await testBrowserAvailability(),
   ];
   
   const passed = tests.filter(t => t.passed).length;

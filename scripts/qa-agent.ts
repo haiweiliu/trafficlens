@@ -128,11 +128,13 @@ async function testDataExtraction(): Promise<QAResult> {
 }
 
 /**
- * Test 3: Cache functionality
+ * Test 3: Cache functionality (enhanced with validation tests)
  */
 async function testCacheFunctionality(): Promise<QAResult> {
   const testName = 'Cache Functionality';
   try {
+    const { getDb } = await import('../lib/db');
+    const db = getDb();
     const testDomains = ['google.com'];
     
     // First scrape (should populate cache)
@@ -162,6 +164,30 @@ async function testCacheFunctionality(): Promise<QAResult> {
         testName,
         passed: false,
         error: 'Cached data marked as stale incorrectly',
+      };
+    }
+    
+    // Cache performance test (should be fast)
+    const startTime = Date.now();
+    getLatestTrafficDataBatch(testDomains);
+    const responseTime = Date.now() - startTime;
+    if (responseTime > 100) {
+      return {
+        testName,
+        passed: false,
+        error: `Cache lookup too slow: ${responseTime}ms (expected < 100ms)`,
+      };
+    }
+    
+    // Test www. variations
+    const domain = testDomains[0];
+    const resultsWithWww = getLatestTrafficDataBatch([`www.${domain}`]);
+    const resultsWithoutWww = getLatestTrafficDataBatch([domain]);
+    if (resultsWithWww.size === 0 && resultsWithoutWww.size === 0) {
+      return {
+        testName,
+        passed: false,
+        error: 'Cache lookup failed for www. variation',
       };
     }
     
