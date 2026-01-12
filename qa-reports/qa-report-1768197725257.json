@@ -1,0 +1,45 @@
+{
+  "timestamp": "2026-01-12T06:01:04.137Z",
+  "totalTests": 5,
+  "passed": 5,
+  "failed": 0,
+  "fixed": 0,
+  "results": [
+    {
+      "testName": "Basic Scraping",
+      "passed": true
+    },
+    {
+      "testName": "Data Extraction",
+      "passed": true,
+      "details": {
+        "extracted": {
+          "domain": "google.com",
+          "monthlyVisits": 84170000000,
+          "avgSessionDuration": "00:09:52",
+          "avgSessionDurationSeconds": 592,
+          "bounceRate": 28.5,
+          "pagesPerVisit": 8.36,
+          "checkedAt": null,
+          "error": null
+        }
+      }
+    },
+    {
+      "testName": "Cache Functionality",
+      "passed": true
+    },
+    {
+      "testName": "Order Preservation",
+      "passed": true
+    },
+    {
+      "testName": "Error Handling",
+      "passed": true,
+      "details": {
+        "handled": true,
+        "monthlyVisits": 0
+      }
+    }
+  ]
+}

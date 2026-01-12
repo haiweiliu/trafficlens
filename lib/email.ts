@@ -371,4 +371,3 @@ ${issueList}
     return false;
   }
 }
-

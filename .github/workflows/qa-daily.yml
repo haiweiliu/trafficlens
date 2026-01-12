@@ -8,6 +8,11 @@ on:
 jobs:
   qa:
     runs-on: ubuntu-latest
+    env:
+      # Email notifications (optional - will skip if not set)
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      EMAIL_TO: ${{ secrets.EMAIL_TO || 'mingcomco@gmail.com' }}
+      EMAIL_FROM: ${{ secrets.EMAIL_FROM || 'onboarding@resend.dev' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -36,15 +41,21 @@ jobs:
           path: qa-reports/
           retention-days: 30
       
-      - name: Comment on failure
+      - name: Notify on failure
         if: failure()
         uses: actions/github-script@v6
         with:
           script: |
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: '⚠️ QA tests failed. Check the workflow logs and QA reports artifact.'
-            })
+            // Only comment if this is a PR/workflow_dispatch, not scheduled runs
+            if (context.payload.issue || context.payload.pull_request) {
+              github.rest.issues.createComment({
+                issue_number: context.issue?.number || context.payload.pull_request?.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: '⚠️ QA tests failed. Check the workflow logs and QA reports artifact.'
+              });
+            } else {
+              console.log('⚠️ QA tests failed. Check the workflow logs and QA reports artifact.');
+              console.log('📧 Email notification sent if RESEND_API_KEY is configured.');
+            }
 
