@@ -1,0 +1,21 @@
+{
+  "startTime": "2026-01-14T19:42:53.720Z",
+  "endTime": "2026-01-14T19:44:21.429Z",
+  "totalIterations": 1,
+  "totalRuntime": 87709,
+  "finalStatus": "success",
+  "iterations": [
+    {
+      "iteration": 1,
+      "timestamp": "2026-01-14T19:44:21.429Z",
+      "testsRun": 13,
+      "testsPassed": 13,
+      "testsFailed": 0,
+      "fixesAttempted": 0,
+      "fixesSucceeded": 0,
+      "errors": []
+    }
+  ],
+  "unresolvedErrors": [],
+  "resolvedErrors": []
+}

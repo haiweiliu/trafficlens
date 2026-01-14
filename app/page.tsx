@@ -38,7 +38,7 @@ export default function Home() {
     }
 
     setLoading(true);
-    setProgress('Loading cached results...');
+    setProgress('Checking cache...');
     setResults([]);
 
     try {
@@ -77,9 +77,19 @@ export default function Home() {
       
       const cacheHits = data.metadata.cacheHits;
       const cacheMisses = data.metadata.cacheMisses;
+      const totalDomains = data.metadata.totalDomains;
+      
+      // Immediate feedback based on cache status
+      if (cacheHits === totalDomains) {
+        // All from cache - instant response!
+        setProgress(`✅ All ${cacheHits} domains served from cache (instant)`);
+        setLoading(false);
+        setTimeout(() => setProgress(''), 3000);
+        return;
+      }
       
       if (cacheMisses > 0) {
-        setProgress(`Showing ${cacheHits} cached results. Scraping ${cacheMisses} domains in background...`);
+        setProgress(`📦 ${cacheHits} from cache (instant). ⏳ Scraping ${cacheMisses} new domains...`);
         
         const MAX_POLL_TIME = 60000; // 1 minute max
         const POLL_INTERVAL = 2000; // Poll every 2 seconds
@@ -129,16 +139,17 @@ export default function Home() {
               
               if (!stillScraping) {
                 clearInterval(pollInterval);
-                setProgress(`Completed! ${cacheHits} from cache, ${cacheMisses} scraped.`);
+                setProgress(`✅ Done! ${cacheHits} from cache, ${cacheMisses} freshly scraped.`);
                 setLoading(false);
                 setTimeout(() => setProgress(''), 3000);
               } else {
                 // Update progress with time remaining
                 const remaining = Math.ceil((MAX_POLL_TIME - elapsed) / 1000);
-                const completed = cacheMisses - mergedResults.filter(r => 
+                const stillScrapingCount = mergedResults.filter(r => 
                   r.error?.includes('Still scraping') || r.error?.includes('Scraping in background')
                 ).length;
-                setProgress(`Showing ${cacheHits} cached results. Scraping ${cacheMisses} domains (${completed}/${cacheMisses} done, ${remaining}s remaining)...`);
+                const completed = cacheMisses - stillScrapingCount;
+                setProgress(`📦 ${cacheHits} cached. ⏳ Scraping: ${completed}/${cacheMisses} done (${remaining}s timeout)...`);
               }
             }
           } catch (error) {

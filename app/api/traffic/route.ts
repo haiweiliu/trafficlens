@@ -309,59 +309,22 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // For cache misses, try quick scrape first (for "No valid data" cases)
-    // Only create placeholders if quick scrape doesn't work
+    // For cache misses, return placeholders IMMEDIATELY and scrape in background
+    // This ensures instant response for cached data - NO BLOCKING on scraping
     const placeholderResults: TrafficData[] = [];
-    const domainsNeedingBackgroundScrape: string[] = [];
     
-    // Quick scrape check for cache misses (detects "No valid data" immediately)
-    // This runs synchronously to avoid "Scraping in background..." for "No valid data" cases
-    if (cacheMisses.length > 0) {
-      try {
-        // Process in batches of 10 (traffic.cv limit)
-        const batches = chunkArray(cacheMisses, 10);
-        for (const batch of batches) {
-          const quickResults = await scrapeTrafficData(batch, false);
-          for (const result of quickResults) {
-            // If error is null, we got a result (0 traffic or valid data) - no background scraping needed
-            if (result.error === null) {
-              placeholderResults.push(result);
-              // Store in database immediately (including 0 traffic results)
-              storeTrafficData(result);
-            } else {
-              // Only use background scraping if there's an actual scraping error
-              // (not for "No valid data" cases which should return error: null, monthlyVisits: 0)
-              domainsNeedingBackgroundScrape.push(result.domain);
-              placeholderResults.push({
-                domain: result.domain,
-                monthlyVisits: null,
-                avgSessionDuration: null,
-                avgSessionDurationSeconds: null,
-                bounceRate: null,
-                pagesPerVisit: null,
-                checkedAt: null,
-                error: 'Scraping in background...',
-              });
-            }
-          }
-        }
-      } catch (error) {
-        // If quick scrape fails, fall back to background scraping
-        console.error('Quick scrape failed, falling back to background:', error);
-        for (const domain of cacheMisses) {
-          domainsNeedingBackgroundScrape.push(domain);
-          placeholderResults.push({
-            domain,
-            monthlyVisits: null,
-            avgSessionDuration: null,
-            avgSessionDurationSeconds: null,
-            bounceRate: null,
-            pagesPerVisit: null,
-            checkedAt: null,
-            error: 'Scraping in background...',
-          });
-        }
-      }
+    // Create placeholders for ALL cache misses - no blocking scrape
+    for (const domain of cacheMisses) {
+      placeholderResults.push({
+        domain,
+        monthlyVisits: null,
+        avgSessionDuration: null,
+        avgSessionDurationSeconds: null,
+        bounceRate: null,
+        pagesPerVisit: null,
+        checkedAt: null,
+        error: 'Scraping in background...',
+      });
     }
 
     // Combine cached + placeholders
@@ -380,12 +343,16 @@ export async function POST(request: NextRequest) {
       return orderA - orderB;
     });
 
-    // Start background scraping only for domains that need it (non-blocking)
-    if (domainsNeedingBackgroundScrape.length > 0) {
+    // Start background scraping for ALL cache misses (non-blocking)
+    // This is fire-and-forget - response returns immediately
+    if (cacheMisses.length > 0) {
+      console.log(`[API] Returning ${cacheHits} cached results immediately, ${cacheMisses.length} domains will scrape in background`);
       // Don't await - let it run in background
-      scrapeInBackground(domainsNeedingBackgroundScrape, domainOrderMap, originalDomainMap).catch(err => {
+      scrapeInBackground(cacheMisses, domainOrderMap, originalDomainMap).catch(err => {
         console.error('[Background] Failed to start background scraping:', err);
       });
+    } else {
+      console.log(`[API] All ${cacheHits} domains served from cache - instant response`);
     }
 
     // Log usage statistics (only for cached results for now)
