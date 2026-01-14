@@ -85,35 +85,40 @@ export async function scrapeTrafficData(
     console.log(`Navigating to: ${url}`);
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
     
-    // Quick check for "No valid data" or "Unregistered domain" messages
-    // These should be detected early to avoid unnecessary waiting
-    // Wait a tiny bit for page to render, then check immediately
-    await page.waitForTimeout(500); // Minimal wait for page content
-    const quickCheckText = await page.textContent('body').catch(() => '');
-    const pageHTML = await page.content().catch(() => '');
-    const allText = (quickCheckText + ' ' + pageHTML).toLowerCase();
-    
-    const hasNoDataMessage = allText.includes('no valid data') ||
-                             allText.includes('unregistered domain') ||
-                             allText.includes('not registered') ||
-                             allText.includes('data is unavailable') ||
-                             allText.includes('this domain is not registered');
-    
-    if (hasNoDataMessage) {
-      console.log(`Quick detection: Domain(s) show "No valid data" - returning early`);
-      await browser.close();
+    // Quick check for "No valid data" - ONLY for single domain queries
+    // For bulk queries, let the normal extraction process handle individual domains
+    // This prevents false positives where one domain with no data causes all domains to return 0
+    if (domains.length === 1) {
+      await page.waitForTimeout(1000); // Wait a bit longer for single domain
+      const quickCheckText = await page.textContent('body').catch(() => '');
+      const pageHTML = await page.content().catch(() => '');
+      const allText = (quickCheckText + ' ' + pageHTML).toLowerCase();
       
-      // Return results with 0 traffic for all domains (not an error - just no data)
-      return domains.map(domain => ({
-        domain,
-        monthlyVisits: 0,
-        avgSessionDuration: null,
-        avgSessionDurationSeconds: null,
-        bounceRate: null,
-        pagesPerVisit: null,
-        checkedAt: new Date().toISOString(),
-        error: null, // Not an error - just no data available
-      }));
+      const hasNoDataMessage = allText.includes('no valid data') ||
+                               allText.includes('unregistered domain') ||
+                               allText.includes('not registered') ||
+                               allText.includes('data is unavailable') ||
+                               allText.includes('this domain is not registered');
+      
+      // Only return early if we're certain ALL domains have no data (single domain case)
+      if (hasNoDataMessage && !allText.includes('total visits') && !allText.includes('monthly')) {
+        console.log(`Quick detection: Single domain shows "No valid data" - returning early`);
+        await browser.close();
+        
+        return domains.map(domain => ({
+          domain,
+          monthlyVisits: 0,
+          avgSessionDuration: null,
+          avgSessionDurationSeconds: null,
+          bounceRate: null,
+          pagesPerVisit: null,
+          checkedAt: new Date().toISOString(),
+          error: null, // Not an error - just no data available
+        }));
+      }
+    } else {
+      // For bulk queries, wait a bit for page to load but don't do quick detection
+      await page.waitForTimeout(500);
     }
 
     // Optimize: Wait for results with shorter timeout
