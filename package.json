@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "postinstall": "npx playwright install chromium --with-deps",
+    "postinstall": "if [ -z \"$VERCEL\" ]; then npx playwright install chromium --with-deps; fi",
     "start": "next start",
     "lint": "next lint",
     "test": "echo \"Error: no test specified\" && exit 1",
