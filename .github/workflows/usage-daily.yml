@@ -1,19 +1,23 @@
-name: Daily Usage Report
+name: Daily Report
 
 on:
   schedule:
-    - cron: '0 3 * * *'  # 3 AM UTC daily (1 hour after QA)
+    - cron: '0 9 * * *'  # 9 AM UTC daily (1 AM PST)
   workflow_dispatch:  # Manual trigger
 
 jobs:
-  usage-report:
+  daily-report:
     runs-on: ubuntu-latest
+    env:
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      EMAIL_TO: ${{ secrets.EMAIL_TO || 'mingcomco@gmail.com' }}
+      EMAIL_FROM: ${{ secrets.EMAIL_FROM || 'onboarding@resend.dev' }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
@@ -21,10 +25,23 @@ jobs:
       - name: Install dependencies
         run: npm install
       
-      - name: Generate usage report
-        env:
-          EMAIL_USER: ${{ secrets.EMAIL_USER }}
-          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
-        run: npm run usage:report
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+      
+      - name: Run QA tests first
+        run: npm run qa
         continue-on-error: true
-
+      
+      - name: Generate and send daily report
+        run: npm run report:daily
+        continue-on-error: true
+      
+      - name: Upload reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: daily-reports
+          path: |
+            daily-reports/
+            qa-reports/
+          retention-days: 30

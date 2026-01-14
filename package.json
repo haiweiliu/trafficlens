@@ -21,7 +21,8 @@
     "qa:loop:quick": "tsx scripts/ralph-wiggum-agent.ts --quick",
     "test:email": "tsx scripts/test-email.ts",
     "data:quality": "tsx scripts/data-quality-agent.ts",
-    "pre-deploy": "tsx scripts/pre-deployment-agent.ts"
+    "pre-deploy": "tsx scripts/pre-deployment-agent.ts",
+    "report:daily": "tsx scripts/daily-report.ts"
   },
   "keywords": [],
   "author": "",

@@ -1,142 +1,137 @@
 # Email Setup Guide
 
-This guide explains how to configure email notifications for QA errors and daily usage reports.
+This guide explains how to configure email notifications for QA errors, daily usage reports, and comprehensive daily summaries.
 
 ## Overview
 
-TrafficLens can send emails for:
+TrafficLens uses **Resend** for email notifications and can send:
 - **QA Error Notifications**: Sent when QA tests fail
-- **Daily Usage Reports**: Sent daily with usage statistics
+- **Daily Usage Reports**: Sent with usage statistics
+- **Comprehensive Daily Reports**: Combined QA, usage, and system health in one email
 
-## Setup Instructions
+**Default Recipient**: `mingcomco@gmail.com`
 
-### Option 1: Gmail (Recommended for Development)
+## Quick Setup (5 minutes)
 
-1. **Enable 2-Factor Authentication** on your Gmail account
+### Step 1: Get a Resend API Key
 
-2. **Generate App Password**:
-   - Go to [Google Account Settings](https://myaccount.google.com/)
-   - Security → 2-Step Verification → App passwords
-   - Generate a new app password for "Mail"
-   - Copy the 16-character password
+1. Sign up at [resend.com](https://resend.com) (free tier: 3,000 emails/month)
+2. Go to API Keys → Create API Key
+3. Copy the key (starts with `re_`)
 
-3. **Set Environment Variables**:
+### Step 2: Configure Environment Variables
 
-   **Local Development:**
-   ```bash
-   export EMAIL_USER="your-email@gmail.com"
-   export EMAIL_PASSWORD="your-16-char-app-password"
-   export EMAIL_FROM="your-email@gmail.com"
-   ```
+**Local Development:**
+```bash
+export RESEND_API_KEY="re_xxxxxx"
+export EMAIL_TO="mingcomco@gmail.com"
+export EMAIL_FROM="onboarding@resend.dev"  # Default sender
 
-   **Railway:**
-   - Go to Railway project → Variables
-   - Add:
-     - `EMAIL_USER` = `your-email@gmail.com`
-     - `EMAIL_PASSWORD` = `your-16-char-app-password`
-     - `EMAIL_FROM` = `your-email@gmail.com`
-
-   **GitHub Actions:**
-   - Go to Repository → Settings → Secrets and variables → Actions
-   - Add secrets:
-     - `EMAIL_USER` = `your-email@gmail.com`
-     - `EMAIL_PASSWORD` = `your-16-char-app-password`
-
-### Option 2: SendGrid (Recommended for Production)
-
-1. **Sign up for SendGrid** (free tier: 100 emails/day)
-
-2. **Create API Key**:
-   - Dashboard → Settings → API Keys
-   - Create API Key with "Mail Send" permissions
-
-3. **Update `lib/email.ts`**:
-   ```typescript
-   // Replace getTransporter() function
-   function getTransporter() {
-     return nodemailer.createTransport({
-       host: 'smtp.sendgrid.net',
-       port: 587,
-       auth: {
-         user: 'apikey',
-         pass: process.env.SENDGRID_API_KEY,
-       },
-     });
-   }
-   ```
-
-4. **Set Environment Variable**:
-   - `SENDGRID_API_KEY` = your SendGrid API key
-
-### Option 3: Other SMTP Services
-
-You can use any SMTP service by updating the `getTransporter()` function in `lib/email.ts`:
-
-```typescript
-function getTransporter() {
-  return nodemailer.createTransport({
-    host: 'smtp.your-provider.com',
-    port: 587,
-    secure: false, // true for 465, false for other ports
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASSWORD,
-    },
-  });
-}
+# Then test:
+npm run test:email
 ```
 
-## Testing
+**Railway:**
+1. Go to Railway project → Variables
+2. Add: `RESEND_API_KEY` = `re_xxxxxx`
 
-Test email configuration:
+**GitHub Actions (for daily reports):**
+1. Go to Repository → Settings → Secrets and variables → Actions
+2. Add secret: `RESEND_API_KEY` = `re_xxxxxx`
+3. Optionally add: `EMAIL_TO` = `mingcomco@gmail.com`
+
+## Testing Email
 
 ```bash
-# Test QA error email (simulate failure)
-npm run qa
+# Test all email types
+npm run test:email
 
-# Test usage report email
-npm run usage:report
+# Or pass API key directly
+npm run test:email -- re_xxxxxx
+
+# Generate and send daily report
+npm run report:daily
 ```
 
-## Email Recipients
+## Email Schedule
 
-- **QA Error Emails**: Sent to `mingcomco@gmail.com`
-- **Usage Reports**: Sent to `mingcomco@gmail.com`
+| Email | Schedule | Trigger |
+|-------|----------|---------|
+| QA Error Email | On failure | Automatic via QA agent |
+| Daily Report | 9 AM UTC | GitHub Actions (cron) |
 
-To change the recipient, update `EMAIL_TO` in `lib/email.ts`.
+## Custom Domain (Optional)
+
+The free tier only allows sending from `onboarding@resend.dev`. To send from your own domain:
+
+1. Go to [resend.com/domains](https://resend.com/domains)
+2. Add your domain
+3. Add DNS records (MX, SPF, DKIM)
+4. Update `EMAIL_FROM` environment variable
+
+## Email Types
+
+### 1. QA Error Email (`sendQAErrorEmail`)
+- Sent when QA tests fail
+- Includes failed test details
+- Shows auto-fixed vs manual-fix-needed
+
+### 2. Usage Report Email (`sendUsageReportEmail`)
+- Daily usage statistics
+- Domain counts, cache hits/misses
+- Total visits tracked
+
+### 3. Comprehensive Daily Report (`generateDailyReport`)
+- Combined QA + Usage + System Health
+- Beautiful HTML format
+- Sent via `npm run report:daily`
+
+## Environment Variables Reference
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `RESEND_API_KEY` | Resend API key (required) | - |
+| `EMAIL_TO` | Recipient email | `mingcomco@gmail.com` |
+| `EMAIL_FROM` | Sender email | `onboarding@resend.dev` |
 
 ## Troubleshooting
 
-### "Email credentials not configured"
+### "RESEND_API_KEY not configured"
+- Ensure the environment variable is set
+- Restart the application after setting
 
-- Ensure environment variables are set
-- Check variable names match exactly
-- Restart the application after setting variables
+### "Can only send testing emails to your own email"
+- Free tier limitation
+- Add and verify a domain at resend.com/domains
+- Or use the email associated with your Resend account
 
-### "Authentication failed"
+### Emails not arriving
+- Check spam/junk folder
+- Verify API key is correct
+- Check GitHub Actions logs
+- Test locally with `npm run test:email`
 
-- For Gmail: Use App Password, not regular password
-- Check that 2FA is enabled
-- Verify password is correct (no spaces)
+### Daily report not sending
+- Ensure `RESEND_API_KEY` secret is set in GitHub
+- Check GitHub Actions → Daily Report workflow
+- Manually trigger: Actions → Daily Report → Run workflow
 
-### "Connection timeout"
+## Manual Email Triggers
 
-- Check firewall settings
-- Verify SMTP host and port
-- Try different SMTP service
+```bash
+# Send test QA error email
+npm run test:email
 
-### Emails not sending
+# Generate and send daily report manually
+npm run report:daily
 
-- Check application logs for errors
-- Verify email credentials
-- Test with manual email sending
-- Check spam folder
+# Run QA tests (will email on failure if configured)
+npm run qa
+```
 
 ## Security Notes
 
-- **Never commit** email passwords to git
-- Use environment variables or secrets
-- Use App Passwords (Gmail) or API Keys (SendGrid)
-- Rotate passwords regularly
-- Use production email service (SendGrid) for production
-
+- ✅ Never commit API keys to git
+- ✅ Use GitHub Secrets for CI/CD
+- ✅ Use Railway Variables for production
+- ✅ Rotate API keys periodically
