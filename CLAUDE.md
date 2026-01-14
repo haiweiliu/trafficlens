@@ -260,11 +260,69 @@ When creating agents:
 
 ---
 
+## Critical: Instant Cache Returns
+
+### The Problem We Fixed (January 2026)
+"Loading cached results..." was taking too long because the API was **blocking on scraping** before returning cached data.
+
+### The Rule: NEVER Block on Scraping
+```
+✅ CORRECT:
+1. Check cache → return cached results IMMEDIATELY (<100ms)
+2. For cache misses → return placeholders immediately
+3. Scrape in background (fire-and-forget)
+4. Frontend polls for updates
+
+❌ WRONG:
+1. Check cache
+2. For cache misses → scrape synchronously (BLOCKS!)
+3. Then return all results
+```
+
+### Code Pattern
+```typescript
+// API Route - app/api/traffic/route.ts
+
+// 1. Check cache FIRST
+const cached = getLatestTrafficDataBatch(domains);
+
+// 2. Return cached results IMMEDIATELY
+const cachedResults = [...cached.values()];
+
+// 3. Create placeholders for cache misses (no blocking)
+const placeholders = cacheMisses.map(domain => ({
+  domain,
+  monthlyVisits: null,
+  error: 'Scraping in background...',
+}));
+
+// 4. Return immediately (no await!)
+scrapeInBackground(cacheMisses).catch(console.error);  // Fire-and-forget
+
+return Response.json({ results: [...cachedResults, ...placeholders] });
+```
+
+### Frontend Feedback
+```
+All cached:    "✅ All 80 domains served from cache (instant)"
+Mixed:         "📦 50 from cache (instant). ⏳ Scraping 30 new domains..."
+Completed:     "✅ Done! 50 from cache, 30 freshly scraped."
+```
+
+### Why This Matters
+- SimilarWeb data updates monthly
+- Once checked, data is valid for 30 days
+- Previously checked domains should return in <100ms
+- Users shouldn't wait for new domains when cached data exists
+
+---
+
 ## Remember
 
 - **Cache is king** - SimilarWeb updates monthly, cache aggressively
 - **0 traffic is valid** - Not an error, should be cached
 - **Return fast** - Cached results instantly, quick scrape for "No valid data"
+- **NEVER block on scraping** - Return cached data immediately, scrape in background
 - **Verify everything** - Test, validate, iterate
 - **Document learnings** - Update this file when you learn something new
 
