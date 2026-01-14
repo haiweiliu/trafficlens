@@ -36,6 +36,26 @@ const QA_TEST_DOMAINS = [
   'youtube.com',
 ];
 
+// Real domain test suite - user-provided domains that should have traffic > 0
+export const REAL_DOMAIN_TEST_SUITE = [
+  'btf-lighting.com',
+  'protoarc.com',
+  'maestrihouse.com',
+  'mjjc.com',
+  'sofirnlight.com',
+  'theoriginalmoonlamp.com',
+  'allvirginhair.com',
+  'counter.com',
+  'designformal.com',
+  'thefoxdecor.com',
+  'cobakcase.com',
+  'isudar.com',
+  'fitnessplus.com',
+  'zooki.com',
+  'hyperspacelight.com',
+  'zbiotics.com',
+];
+
 /**
  * Test 1: Basic scraping functionality
  */
@@ -254,7 +274,74 @@ async function testOrderPreservation(): Promise<QAResult> {
 }
 
 /**
- * Test 5: Error handling
+ * Test 5: Real domain traffic validation
+ * Tests that known-traffic domains return visits > 0
+ */
+async function testRealDomainTraffic(): Promise<QAResult> {
+  const testName = 'Real Domain Traffic';
+  try {
+    // Test a sample of real domains (not all to keep test fast)
+    const sampleDomains = REAL_DOMAIN_TEST_SUITE.slice(0, 5);
+    console.log(`  Testing ${sampleDomains.length} real domains...`);
+    
+    const results = await scrapeTrafficData(sampleDomains, false);
+    
+    if (results.length === 0) {
+      return {
+        testName,
+        passed: false,
+        error: 'No results returned for real domains',
+      };
+    }
+    
+    // Check how many returned valid traffic
+    const withTraffic = results.filter(r => !r.error && r.monthlyVisits !== null && r.monthlyVisits > 0);
+    const withZero = results.filter(r => r.monthlyVisits === 0);
+    const withErrors = results.filter(r => r.error);
+    
+    // At least 60% should have traffic (some might legitimately have low/no traffic)
+    const successRate = withTraffic.length / results.length;
+    
+    if (successRate < 0.6) {
+      const failedDomains = results
+        .filter(r => !r.monthlyVisits || r.monthlyVisits === 0)
+        .map(r => `${r.domain}: ${r.error || 'zero visits'}`)
+        .join(', ');
+      
+      return {
+        testName,
+        passed: false,
+        error: `Only ${Math.round(successRate * 100)}% of real domains returned traffic (expected ≥60%). Failed: ${failedDomains}`,
+        details: {
+          total: results.length,
+          withTraffic: withTraffic.length,
+          withZero: withZero.length,
+          withErrors: withErrors.length,
+          successRate: Math.round(successRate * 100),
+        },
+      };
+    }
+    
+    return { 
+      testName, 
+      passed: true, 
+      details: {
+        total: results.length,
+        withTraffic: withTraffic.length,
+        successRate: Math.round(successRate * 100),
+      },
+    };
+  } catch (error) {
+    return {
+      testName,
+      passed: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
+
+/**
+ * Test 6: Error handling
  */
 async function testErrorHandling(): Promise<QAResult> {
   const testName = 'Error Handling';
@@ -343,6 +430,7 @@ export async function runQATests(): Promise<QAReport> {
     testDataExtraction,
     testCacheFunctionality,
     testOrderPreservation,
+    testRealDomainTraffic,  // New: Test real domains with expected traffic
     testErrorHandling,
   ];
   

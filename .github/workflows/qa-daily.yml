@@ -4,10 +4,21 @@ on:
   schedule:
     - cron: '0 2 * * *'  # 2 AM UTC daily
   workflow_dispatch:  # Manual trigger
+    inputs:
+      run_mode:
+        description: 'Test mode'
+        required: false
+        default: 'standard'
+        type: choice
+        options:
+          - standard
+          - full-loop
+          - quick-test
 
 jobs:
   qa:
     runs-on: ubuntu-latest
+    timeout-minutes: 15  # 15 minute timeout
     env:
       # Email notifications (optional - will skip if not set)
       RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
@@ -29,8 +40,19 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install chromium --with-deps
       
-      - name: Run QA tests
+      - name: Run Standard QA tests
+        if: ${{ github.event.inputs.run_mode != 'full-loop' && github.event.inputs.run_mode != 'quick-test' }}
         run: npm run qa
+        continue-on-error: true
+      
+      - name: Run Ralph Wiggum Loop (Full)
+        if: ${{ github.event.inputs.run_mode == 'full-loop' }}
+        run: npm run qa:loop:full
+        continue-on-error: true
+      
+      - name: Run Quick Test
+        if: ${{ github.event.inputs.run_mode == 'quick-test' }}
+        run: npm run qa:loop:quick
         continue-on-error: true
       
       - name: Upload QA reports
@@ -38,8 +60,24 @@ jobs:
         if: always()
         with:
           name: qa-reports
-          path: qa-reports/
+          path: |
+            qa-reports/
+            ralph-wiggum-reports/
           retention-days: 30
+      
+      - name: Summary
+        if: always()
+        run: |
+          echo "## QA Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -d "qa-reports" ]; then
+            echo "### Standard QA Reports" >> $GITHUB_STEP_SUMMARY
+            ls -la qa-reports/ >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo "No QA reports found" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -d "ralph-wiggum-reports" ]; then
+            echo "### Ralph Wiggum Reports" >> $GITHUB_STEP_SUMMARY
+            ls -la ralph-wiggum-reports/ >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo "No Ralph Wiggum reports found" >> $GITHUB_STEP_SUMMARY
+          fi
       
       - name: Notify on failure
         if: failure()
