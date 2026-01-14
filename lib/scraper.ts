@@ -1,11 +1,51 @@
 /**
  * Playwright-based scraper for Traffic.cv bulk traffic checker
+ * Supports both Vercel (serverless) and Railway (full filesystem)
  */
 
-import { chromium, Browser, Page } from 'playwright';
+import { Browser, Page } from 'playwright';
 import { parseNumberWithSuffix, parseDurationToSeconds, parsePercentage } from './parsing-utils';
 import { TrafficData } from '@/types';
 import { extractHistoricalMonths, HistoricalMonthData } from './historical-extractor';
+
+/**
+ * Get the appropriate Chromium browser launcher based on environment
+ * - Vercel: Uses @sparticuz/chromium (serverless-compatible)
+ * - Railway/Local: Uses regular Playwright (full filesystem access)
+ */
+async function getChromiumBrowser() {
+  const isVercel = !!(
+    process.env.VERCEL ||
+    process.env.VERCEL_ENV ||
+    process.env.NEXT_PUBLIC_VERCEL_URL
+  );
+
+  if (isVercel) {
+    // Vercel: Use serverless-compatible Chromium
+    const { chromium } = await import('playwright-core');
+    const Chromium = (await import('@sparticuz/chromium')).default;
+    
+    return chromium.launch({
+      headless: true,
+      executablePath: await Chromium.executablePath(),
+      args: Chromium.args,
+    });
+  } else {
+    // Railway/Local: Use regular Playwright
+    const { chromium } = await import('playwright');
+    return chromium.launch({
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--disable-gpu',
+      ],
+    });
+  }
+}
 
 /**
  * Scrapes traffic data from Traffic.cv bulk endpoint
@@ -47,18 +87,8 @@ export async function scrapeTrafficData(
   let browser: Browser | null = null;
 
   try {
-    // Launch Chromium browser (works perfectly on Railway with full filesystem access)
-    browser = await chromium.launch({
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--disable-gpu',
-      ],
-    });
+    // Launch Chromium browser (auto-detects Vercel vs Railway/Local)
+    browser = await getChromiumBrowser();
 
     const context = await browser.newContext({
       userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
