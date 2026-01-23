@@ -34,8 +34,35 @@ async function getChromiumBrowser() {
     // Railway/Local: Use regular Playwright
     const { chromium } = await import('playwright');
 
-    // Check for proxy configuration
-    const proxyUrl = process.env.PROXY_URL;
+    // Determine proxy settings
+    let proxyServer = process.env.PROXY_URL;
+    const proxyscrapeKey = process.env.PROXYSCRAPE_API_KEY;
+
+    // If no manual proxy but API key exists, fetch a dynamic one
+    if (!proxyServer && proxyscrapeKey) {
+      try {
+        console.log('Fetching fresh proxy from ProxyScrape...');
+        // Fetch http proxies, 2s timeout to ensure speed
+        const apiUrl = `https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=2000&country=all&ssl=all&anonymity=all&key=${proxyscrapeKey}`;
+
+        // Use Node's native fetch
+        const response = await fetch(apiUrl);
+        const text = await response.text();
+        const proxies = text.split('\n').map(p => p.trim()).filter(Boolean);
+
+        if (proxies.length > 0) {
+          // Pick a random proxy
+          const randomProxy = proxies[Math.floor(Math.random() * proxies.length)];
+          proxyServer = `http://${randomProxy}`;
+          console.log(`Selected random proxy: ${proxyServer}`);
+        } else {
+          console.warn('No proxies returned from ProxyScrape API');
+        }
+      } catch (error) {
+        console.error('Failed to fetch from ProxyScrape:', error);
+      }
+    }
+
     let launchOptions: any = {
       headless: true,
       args: [
@@ -48,10 +75,10 @@ async function getChromiumBrowser() {
       ],
     };
 
-    if (proxyUrl) {
-      console.log('Using proxy for scraping');
+    if (proxyServer) {
+      console.log(`Using proxy for scraping: ${proxyServer}`);
       launchOptions.proxy = {
-        server: proxyUrl
+        server: proxyServer
       };
     }
 
