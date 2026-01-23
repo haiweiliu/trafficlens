@@ -76,13 +76,6 @@ function initializeSchema(database: Database.Database) {
     );
 
     CREATE INDEX IF NOT EXISTS idx_latest_checked_at ON traffic_latest(checked_at);
-    
-    -- Migration: Add last_error column if it doesn't exist (safe to run on every startup)
-    try {
-      database.exec('ALTER TABLE traffic_latest ADD COLUMN last_error TEXT');
-    } catch (e) {
-      // Column likely already exists, ignore
-    }
 
     CREATE TABLE IF NOT EXISTS traffic_trends (
       domain TEXT NOT NULL,
@@ -130,6 +123,19 @@ function initializeSchema(database: Database.Database) {
   `;
 
   database.exec(schema);
+
+  // Migration: Add last_error column if it doesn't exist (safe to run on every startup)
+  try {
+    // Check if column exists first to avoid error spam in logs
+    const tableInfo = database.pragma('table_info(traffic_latest)') as any[];
+    const hasLastError = tableInfo.some(col => col.name === 'last_error');
+
+    if (!hasLastError) {
+      database.exec('ALTER TABLE traffic_latest ADD COLUMN last_error TEXT');
+    }
+  } catch (e) {
+    // Ignore errors if column addition fails
+  }
 }
 
 /**
