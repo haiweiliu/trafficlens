@@ -247,9 +247,7 @@ export async function sendCodeOptimizationEmail(report: {
       <pre style="background: #f5f5f5; padding: 15px; border-radius: 5px; max-height: 500px; overflow-y: auto;">${issueList}</pre>
       
       ${highSeverityIssues.length > 0 ? `<p style="color: red; font-weight: bold;">⚠️ ${highSeverityIssues.length} high-severity issue(s) require attention!</p>` : ''}
-    `;
-
-    const text = `
+    `;    const text = `
 TrafficLens Code Optimization Report
 
 Date: ${new Date(report.timestamp).toLocaleString()}
@@ -271,9 +269,7 @@ ${issueList}
       subject: `🔧 TrafficLens Code Optimization: ${report.totalIssues} Issue(s) Found`,
       text,
       html,
-    });
-
-    if (error) {
+    });    if (error) {
       console.error('Resend API error:', error);
       return false;
     }

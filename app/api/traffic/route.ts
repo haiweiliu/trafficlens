@@ -11,8 +11,8 @@ import { scrapeTrafficData } from '@/lib/scraper';
 import { retryScrapeTrafficData, backgroundRetryFailedDomains } from '@/lib/retry-scraper';
 import { TrafficData } from '@/types';
 import { trafficCache } from '@/lib/cache';
-import { 
-  getLatestTrafficDataBatch, 
+import {
+  getLatestTrafficDataBatch,
   storeTrafficData,
   storeHistoricalTrafficData,
   isDataFresh,
@@ -71,7 +71,7 @@ async function processBatchesInParallel<T>(
   parallelLimit: number
 ): Promise<BatchResult[]> {
   const results: BatchResult[] = [];
-  
+
   // Process batches in chunks of parallelLimit
   for (let i = 0; i < batches.length; i += parallelLimit) {
     const chunk = batches.slice(i, i + parallelLimit);
@@ -79,24 +79,24 @@ async function processBatchesInParallel<T>(
       const batchIndex = i + chunkIndex;
       return processor(batch, batchIndex).catch(error => {
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-        return { 
-          success: false, 
+        return {
+          success: false,
           error: errorMsg,
           results: []
         };
       });
     });
-    
+
     // Wait for all batches in this chunk to complete
     const chunkResults = await Promise.all(chunkPromises);
     results.push(...chunkResults);
-    
+
     // Small delay between chunks to avoid overwhelming the server
     if (i + parallelLimit < batches.length) {
       await sleep(BATCH_DELAY_MS);
     }
   }
-  
+
   return results;
 }
 
@@ -112,7 +112,7 @@ async function scrapeInBackground(
     if (cacheMisses.length === 0) return;
 
     console.log(`[Background] Starting scrape for ${cacheMisses.length} domains...`);
-    
+
     // Split into batches of 10 (Traffic.cv limit)
     const batches = chunkArray(cacheMisses, 10);
     const allResults: TrafficData[] = [];
@@ -121,20 +121,20 @@ async function scrapeInBackground(
       console.log(`[Background] Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} domains)`);
       try {
         const batchResults = await scrapeTrafficData(batch, false);
-        
-        // Store results in database
+
+        // Store results in database (including errors)
         for (const result of batchResults) {
-          if (!result.error) {
-            // Store current month data
+          // Verify we have minimal valid data to store
+          if (result.domain) {
             storeTrafficData(result);
-            
+
             // Store historical months if available
-            if ('historicalMonths' in result && result.historicalMonths && Array.isArray(result.historicalMonths)) {
+            if (!result.error && 'historicalMonths' in result && result.historicalMonths && Array.isArray(result.historicalMonths)) {
               storeHistoricalTrafficData(result.domain, result.historicalMonths, result);
             }
           }
         }
-        
+
         return {
           success: true,
           results: batchResults,
@@ -142,6 +142,25 @@ async function scrapeInBackground(
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
         console.error(`[Background] Batch ${batchIndex + 1} error:`, errorMsg);
+
+        // Critical: Store error state for all domains in this batch so frontend stops polling
+        try {
+          for (const domain of batch) {
+            storeTrafficData({
+              domain,
+              monthlyVisits: null,
+              avgSessionDuration: null,
+              avgSessionDurationSeconds: null,
+              bounceRate: null,
+              pagesPerVisit: null,
+              checkedAt: new Date().toISOString(),
+              error: `Batch failed: ${errorMsg}`
+            });
+          }
+        } catch (dbError) {
+          console.error('[Background] Failed to store batch error:', dbError);
+        }
+
         return {
           success: false,
           error: errorMsg,
@@ -168,7 +187,7 @@ async function scrapeInBackground(
     const failedDomains = allResults
       .filter(r => r.error)
       .map(r => r.domain);
-    
+
     if (failedDomains.length > 0) {
       console.log(`[Background] Retrying ${failedDomains.length} failed domains...`);
       backgroundRetryFailedDomains(failedDomains);
@@ -195,21 +214,21 @@ export async function POST(request: NextRequest) {
     // Normalize domains but preserve original order mapping
     const normalized = normalizeDomains(rawDomains);
     const domains = normalized.map(d => d.domain);
-    
+
     // Create mapping: normalized domain -> original input order index
     // Also create reverse mapping for www. variations
     const domainOrderMap = new Map<string, number>(); // normalized domain -> original index
     const originalDomainMap = new Map<string, string>(); // normalized domain -> original domain string
-    
+
     normalized.forEach((item, index) => {
       const normDomain = item.domain.toLowerCase().trim();
       const withoutWww = normDomain.replace(/^www\./, '');
       const withWww = `www.${withoutWww}`;
-      
+
       // Map both www. and non-www. variations to the same original index
       domainOrderMap.set(withoutWww, index);
       domainOrderMap.set(withWww, index);
-      
+
       // Store original domain for reference
       originalDomainMap.set(withoutWww, item.original);
       originalDomainMap.set(withWww, item.original);
@@ -284,7 +303,7 @@ export async function POST(request: NextRequest) {
         }
       }
     }
-    
+
     const cacheHits = cached.size;
     const cacheMisses = domains.filter(d => !cached.has(d));
 
@@ -301,7 +320,7 @@ export async function POST(request: NextRequest) {
         const secs = seconds % 60;
         formattedDuration = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
       }
-      
+
       cachedResults.push({
         ...data,
         avgSessionDuration: formattedDuration,
@@ -312,7 +331,7 @@ export async function POST(request: NextRequest) {
     // For cache misses, return placeholders IMMEDIATELY and scrape in background
     // This ensures instant response for cached data - NO BLOCKING on scraping
     const placeholderResults: TrafficData[] = [];
-    
+
     // Create placeholders for ALL cache misses - no blocking scrape
     for (const domain of cacheMisses) {
       placeholderResults.push({
@@ -335,11 +354,11 @@ export async function POST(request: NextRequest) {
       // Normalize result domains for matching
       const aNorm = a.domain.toLowerCase().trim().replace(/^www\./, '');
       const bNorm = b.domain.toLowerCase().trim().replace(/^www\./, '');
-      
+
       // Get original order index (handles www. variations)
       const orderA = domainOrderMap.get(aNorm) ?? domainOrderMap.get(`www.${aNorm}`) ?? Infinity;
       const orderB = domainOrderMap.get(bNorm) ?? domainOrderMap.get(`www.${bNorm}`) ?? Infinity;
-      
+
       return orderA - orderB;
     });
 

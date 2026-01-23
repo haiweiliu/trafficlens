@@ -16,11 +16,11 @@ let db: Database.Database | null = null;
 export function getDb(): Database.Database {
   if (!db) {
     // Use Railway's persistent storage or local data directory
-    const dbPath = process.env.DATABASE_PATH || 
-                   (process.env.RAILWAY_VOLUME_MOUNT_PATH 
-                     ? `${process.env.RAILWAY_VOLUME_MOUNT_PATH}/traffic.db`
-                     : './data/traffic.db');
-    
+    const dbPath = process.env.DATABASE_PATH ||
+      (process.env.RAILWAY_VOLUME_MOUNT_PATH
+        ? `${process.env.RAILWAY_VOLUME_MOUNT_PATH}/traffic.db`
+        : './data/traffic.db');
+
     // Ensure directory exists
     const fs = require('fs');
     const path = require('path');
@@ -28,11 +28,11 @@ export function getDb(): Database.Database {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    
+
     db = new Database(dbPath);
     db.pragma('journal_mode = WAL'); // Better concurrency
     db.pragma('foreign_keys = ON');
-    
+
     // Initialize schema if needed
     initializeSchema(db);
   }
@@ -71,10 +71,18 @@ function initializeSchema(database: Database.Database) {
       pages_per_visit REAL,
       checked_at TIMESTAMP NOT NULL,
       month_year TEXT NOT NULL,
-      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      last_error TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_latest_checked_at ON traffic_latest(checked_at);
+    
+    -- Migration: Add last_error column if it doesn't exist (safe to run on every startup)
+    try {
+      database.exec('ALTER TABLE traffic_latest ADD COLUMN last_error TEXT');
+    } catch (e) {
+      // Column likely already exists, ignore
+    }
 
     CREATE TABLE IF NOT EXISTS traffic_trends (
       domain TEXT NOT NULL,
@@ -120,7 +128,7 @@ function initializeSchema(database: Database.Database) {
       ('update_cutoff_day', '12'),
       ('update_cutoff_buffer_days', '2');
   `;
-  
+
   database.exec(schema);
 }
 
@@ -138,11 +146,11 @@ export function getCurrentMonth(): string {
  */
 function formatDurationFromSeconds(seconds: number | null): string | null {
   if (seconds === null || seconds === undefined) return null;
-  
+
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
   const secs = seconds % 60;
-  
+
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
@@ -157,7 +165,7 @@ export function getExpectedDataMonth(): string {
   const now = new Date();
   const currentDay = now.getDate();
   const cutoffDay = 12; // 10th + 2 day buffer
-  
+
   if (currentDay < cutoffDay) {
     // Before the 12th: Previous month's data is still the latest
     let year = now.getFullYear();
@@ -181,7 +189,7 @@ export function storeTrafficDataForMonth(
   monthYear: string
 ): void {
   const database = getDb();
-  
+
   // Insert or update snapshot
   const stmt = database.prepare(`
     INSERT INTO traffic_snapshots (
@@ -196,7 +204,7 @@ export function storeTrafficDataForMonth(
       checked_at = excluded.checked_at,
       updated_at = CURRENT_TIMESTAMP
   `);
-  
+
   stmt.run(
     data.domain,
     monthYear,
@@ -214,14 +222,14 @@ export function storeTrafficDataForMonth(
 export function storeTrafficData(data: TrafficData): void {
   const monthYear = getCurrentMonth();
   storeTrafficDataForMonth(data, monthYear);
-  
+
   // Update latest cache
   const database = getDb();
   const latestStmt = database.prepare(`
     INSERT INTO traffic_latest (
       domain, monthly_visits, avg_session_duration_seconds,
-      bounce_rate, pages_per_visit, checked_at, month_year
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      bounce_rate, pages_per_visit, checked_at, month_year, last_error
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(domain) DO UPDATE SET
       monthly_visits = excluded.monthly_visits,
       avg_session_duration_seconds = excluded.avg_session_duration_seconds,
@@ -229,9 +237,10 @@ export function storeTrafficData(data: TrafficData): void {
       pages_per_visit = excluded.pages_per_visit,
       checked_at = excluded.checked_at,
       month_year = excluded.month_year,
+      last_error = excluded.last_error,
       updated_at = CURRENT_TIMESTAMP
   `);
-  
+
   latestStmt.run(
     data.domain,
     data.monthlyVisits,
@@ -239,7 +248,8 @@ export function storeTrafficData(data: TrafficData): void {
     data.bounceRate,
     data.pagesPerVisit,
     data.checkedAt || new Date().toISOString(),
-    monthYear
+    monthYear,
+    data.error || null
   );
 }
 
@@ -258,7 +268,7 @@ export function storeHistoricalTrafficData(
 ): void {
   const database = getDb();
   const checkedAt = currentData.checkedAt || new Date().toISOString();
-  
+
   // Store each month's visit data
   const stmt = database.prepare(`
     INSERT INTO traffic_snapshots (
@@ -270,7 +280,7 @@ export function storeHistoricalTrafficData(
       checked_at = excluded.checked_at,
       updated_at = CURRENT_TIMESTAMP
   `);
-  
+
   for (const monthData of monthlyData) {
     // For historical months, we only have visits data
     // Use current month's metrics (duration, bounce rate, etc.) as fallback
@@ -295,10 +305,10 @@ export function getLatestTrafficData(domain: string): TrafficData | null {
   const stmt = database.prepare(`
     SELECT * FROM traffic_latest WHERE domain = ?
   `);
-  
+
   const row = stmt.get(domain) as any;
   if (!row) return null;
-  
+
   return {
     domain: row.domain,
     monthlyVisits: row.monthly_visits,
@@ -318,22 +328,22 @@ export function getLatestTrafficData(domain: string): TrafficData | null {
 export function getLatestTrafficDataBatch(domains: string[]): Map<string, TrafficData> {
   const database = getDb();
   const result = new Map<string, TrafficData>();
-  
+
   // Build query with both www. and non-www. variations
   const allDomainVariations: string[] = [];
   const domainVariationMap = new Map<string, string>(); // db domain variation -> original request domain
-  
+
   for (const domain of domains) {
     const normalized = domain.toLowerCase().trim();
     const withoutWww = normalized.replace(/^www\./, '');
     const withWww = `www.${withoutWww}`;
-    
+
     // Map both variations to the original request domain
     domainVariationMap.set(withoutWww, domain);
     if (withWww !== withoutWww) {
       domainVariationMap.set(withWww, domain);
     }
-    
+
     // Add both variations to query (avoid duplicates)
     if (!allDomainVariations.includes(withoutWww)) {
       allDomainVariations.push(withoutWww);
@@ -342,23 +352,23 @@ export function getLatestTrafficDataBatch(domains: string[]): Map<string, Traffi
       allDomainVariations.push(withWww);
     }
   }
-  
+
   if (allDomainVariations.length === 0) {
     return result;
   }
-  
+
   const placeholders = allDomainVariations.map(() => '?').join(',');
   const stmt = database.prepare(`
     SELECT * FROM traffic_latest WHERE domain IN (${placeholders})
   `);
-  
+
   const rows = stmt.all(...allDomainVariations) as any[];
-  
+
   // Map database results back to original request domains
   for (const row of rows) {
     const dbDomain = row.domain;
     const originalRequestDomain = domainVariationMap.get(dbDomain);
-    
+
     if (originalRequestDomain) {
       // Only add if we haven't already added this domain (avoid duplicates)
       if (!result.has(originalRequestDomain)) {
@@ -370,12 +380,12 @@ export function getLatestTrafficDataBatch(domains: string[]): Map<string, Traffi
           bounceRate: row.bounce_rate,
           pagesPerVisit: row.pages_per_visit,
           checkedAt: row.checked_at,
-          error: null,
+          error: row.last_error || null,
         });
       }
     }
   }
-  
+
   return result;
 }
 
@@ -393,34 +403,34 @@ export function getLatestTrafficDataBatch(domains: string[]): Map<string, Traffi
  */
 export function isDataFresh(domain: string, maxAgeDays: number = 30): boolean {
   const database = getDb();
-  
+
   // Normalize domain for lookup (check both www. and non-www. versions)
   const normalized = domain.toLowerCase().trim();
   const withoutWww = normalized.replace(/^www\./, '');
   const withWww = `www.${withoutWww}`;
-  
+
   // Try both variations
   const stmt = database.prepare(`
     SELECT checked_at, month_year FROM traffic_latest 
     WHERE domain = ? OR domain = ?
   `);
-  
+
   const row = stmt.get(withoutWww, withWww) as any;
   if (!row) return false;
-  
+
   const now = new Date();
   const currentMonth = getCurrentMonth();
   const currentDay = now.getDate();
   const bufferDays = 2; // 2-day buffer for SimilarWeb delays
-  
+
   // SimilarWeb releases monthly data by the 10th of following month
   // So if we're before the 12th (10th + 2 day buffer), previous month's data is still valid
   const cutoffDay = 10 + bufferDays; // 12th of the month
-  
+
   // Parse the stored month_year
   const [storedYear, storedMonth] = row.month_year.split('-').map(Number);
   const [currentYear, currentMonthNum] = currentMonth.split('-').map(Number);
-  
+
   // Calculate previous month
   let prevYear = currentYear;
   let prevMonth = currentMonthNum - 1;
@@ -429,7 +439,7 @@ export function isDataFresh(domain: string, maxAgeDays: number = 30): boolean {
     prevYear = currentYear - 1;
   }
   const previousMonth = `${prevYear}-${String(prevMonth).padStart(2, '0')}`;
-  
+
   // Case 1: Data is from current month - always fresh if we're past the cutoff day
   if (row.month_year === currentMonth) {
     // If we're past the 12th, current month data should be available
@@ -442,7 +452,7 @@ export function isDataFresh(domain: string, maxAgeDays: number = 30): boolean {
     // If we're before the 12th, current month data is definitely fresh (just released)
     return true;
   }
-  
+
   // Case 2: Data is from previous month - valid if we're before the cutoff day
   if (row.month_year === previousMonth) {
     // If we're before the 12th, previous month's data is still valid (new data not released yet)
@@ -455,7 +465,7 @@ export function isDataFresh(domain: string, maxAgeDays: number = 30): boolean {
     // If we're past the 12th, previous month data is stale (new data should be available)
     return false;
   }
-  
+
   // Case 3: Data is from older months - stale
   return false;
 }
@@ -482,7 +492,7 @@ export function getHistoricalData(
     ORDER BY month_year DESC
     LIMIT ?
   `);
-  
+
   return stmt.all(domain, months) as HistoricalData[];
 }
 
@@ -501,27 +511,27 @@ export function calculateGrowthRate(domain: string): number | null {
     ORDER BY month_year DESC
     LIMIT 2
   `);
-  
+
   const rows = stmt.all(domain) as Array<{ month_year: string; monthly_visits: number | null }>;
-  
+
   if (rows.length < 2) {
     return null; // Need at least 2 months of data
   }
-  
+
   const currentMonth = rows[0];
   const previousMonth = rows[1];
-  
+
   if (!currentMonth.monthly_visits || !previousMonth.monthly_visits) {
     return null; // Missing data
   }
-  
+
   if (previousMonth.monthly_visits === 0) {
     return null; // Can't calculate growth from zero
   }
-  
+
   // Calculate percentage change: ((current - previous) / previous) * 100
   const growthRate = ((currentMonth.monthly_visits - previousMonth.monthly_visits) / previousMonth.monthly_visits) * 100;
-  
+
   return Math.round(growthRate * 100) / 100; // Round to 2 decimal places
 }
 
@@ -530,11 +540,11 @@ export function calculateGrowthRate(domain: string): number | null {
  */
 export function calculateGrowthRateBatch(domains: string[]): Map<string, number | null> {
   const result = new Map<string, number | null>();
-  
+
   for (const domain of domains) {
     result.set(domain, calculateGrowthRate(domain));
   }
-  
+
   return result;
 }
 
@@ -558,9 +568,9 @@ export function calculateTrends(domain: string): TrendData[] {
     { type: '6m', months: 6 },
     { type: '12m', months: 12 },
   ];
-  
+
   const trends: TrendData[] = [];
-  
+
   for (const period of periods) {
     const stmt = database.prepare(`
       SELECT 
@@ -574,7 +584,7 @@ export function calculateTrends(domain: string): TrendData[] {
       ORDER BY month_year DESC
       LIMIT ?
     `);
-    
+
     const row = stmt.get(domain, period.months) as any;
     if (row && row.data_points > 0) {
       trends.push({
@@ -587,7 +597,7 @@ export function calculateTrends(domain: string): TrendData[] {
       });
     }
   }
-  
+
   return trends;
 }
 
@@ -598,12 +608,12 @@ export function getStaleDomains(maxAgeDays: number = 30): string[] {
   const database = getDb();
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - maxAgeDays);
-  
+
   const stmt = database.prepare(`
     SELECT domain FROM traffic_latest
     WHERE checked_at < ? OR month_year != ?
   `);
-  
+
   const currentMonth = getCurrentMonth();
   const rows = stmt.all(cutoffDate.toISOString(), currentMonth) as any[];
   return rows.map(row => row.domain);
@@ -617,11 +627,11 @@ export function cleanupOldData(keepMonths: number = 24): void {
   const cutoffMonth = new Date();
   cutoffMonth.setMonth(cutoffMonth.getMonth() - keepMonths);
   const cutoffMonthStr = `${cutoffMonth.getFullYear()}-${String(cutoffMonth.getMonth() + 1).padStart(2, '0')}`;
-  
+
   const stmt = database.prepare(`
     DELETE FROM traffic_snapshots WHERE month_year < ?
   `);
-  
+
   stmt.run(cutoffMonthStr);
 }
 
