@@ -20,3 +20,37 @@ The fix involved ensuring that **all** terminal states of the background process
 
 ### Key Takeaway
 When building async/polling architectures, **failure is a valid state that must be persisted**. If a background worker crashes silently, the system enters a zombie state. Always capture failures and write them to the shared state (DB/Cache) so the client can stop waiting.
+
+## [2026-01-22] SQL String Embedding Error
+
+### Situation
+After deploying the fix, the app returned `500 Internal Server Error` with `Error: near "try": syntax error`.
+
+### Cause
+We attempted to run a migration by embedding TypeScript logic *inside* a SQL execution string:
+
+```typescript
+// BAD
+const schema = `
+  CREATE TABLE ...;
+  try { ... } catch (e) { ... } // <--- This is treated as SQL!
+`;
+db.exec(schema);
+```
+
+### Resolution
+Move imperative logic (like `try/catch` checks) *outside* of SQL strings.
+
+```typescript
+// GOOD
+const schema = `CREATE TABLE ...;`;
+db.exec(schema);
+
+try {
+   // Run migration logic as TS code
+   db.exec('ALTER TABLE ...');
+} catch (e) { ... }
+```
+
+### Key Takeaway
+Strings passed to `db.exec()` must be pure SQL. Do not mix language constructs. Migration scripts often require a mix of SQL (for data) and code (for control flow); keep them separate.

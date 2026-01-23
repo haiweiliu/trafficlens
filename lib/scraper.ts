@@ -36,9 +36,31 @@ async function getChromiumBrowser() {
 
     // Determine proxy settings
     let proxyServer = process.env.PROXY_URL;
+    let proxyUsername = process.env.PROXY_USERNAME;
+    let proxyPassword = process.env.PROXY_PASSWORD;
     const proxyscrapeKey = process.env.PROXYSCRAPE_API_KEY;
 
-    // If no manual proxy but API key exists, fetch a dynamic one
+    // Default to PyProxy Sticky IP if no manual proxy is set
+    // WE USE STICKY IP (Session) for better speed/success rate, with random session ID to avoid collisions
+    if (!proxyServer && !proxyscrapeKey) {
+      const sessionId = Math.random().toString(36).substring(2, 10);
+      proxyServer = 'http://c36288e57056c2d5.byi.na.pyproxy.io:16666';
+      // Session duration 30 mins (sessTime-30)
+      proxyUsername = `proxyming123-zone-resi-session-${sessionId}-sessTime-30`;
+      proxyPassword = 'G12345678';
+      console.log(`Using PyProxy Sticky IP (Session: ${sessionId})`);
+    }
+
+    // [Fallback logic for ProxyScrape removed/demoted or kept if you want fallback, 
+    // but user requested to use Sticky IP. The existing code had a check for proxyscrapeKey. 
+    // I will keep the PROXY_URL check logic but prioritize the PyProxy default if nothing is set.]
+
+    // If no manual proxy but API key exists (and we didn't set PyProxy above), fetch a dynamic one
+    // Note: The previous logic was "if !proxyServer && key". 
+    // Since we now set proxyServer for PyProxy default, this block will effectively be skipped unless we change logic.
+    // However, if the user explicitly wants to use ProxyScrape, they might not set PROXY_URL but providing the KEY.
+    // So to be safe, let's only use PyProxy if NO config is present at all.
+
     if (!proxyServer && proxyscrapeKey) {
       try {
         console.log('Fetching fresh proxy from ProxyScrape...');
@@ -76,9 +98,11 @@ async function getChromiumBrowser() {
     };
 
     if (proxyServer) {
-      console.log(`Using proxy for scraping: ${proxyServer}`);
+      console.log(`Using proxy configuration: ${proxyServer.split('@').pop()}`); // Log simplified URL for privacy
       launchOptions.proxy = {
-        server: proxyServer
+        server: proxyServer,
+        username: proxyUsername,
+        password: proxyPassword
       };
     }
 
