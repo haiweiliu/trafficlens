@@ -28,8 +28,8 @@ async function testProxyLogic() {
             try {
                 await page.goto('http://example.com', { timeout: 10000 });
                 console.log('Successfully navigated to example.com via proxy!');
-            } catch (e) {
-                console.log('Navigation failed (expected for some public proxies):', e.message.split('\n')[0]);
+            } catch (e: any) {
+                console.log('Navigation failed (expected for some public proxies):', e.message?.split('\n')[0]);
             }
             await browser.close();
         } else {
