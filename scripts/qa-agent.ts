@@ -57,14 +57,49 @@ export const REAL_DOMAIN_TEST_SUITE = [
 ];
 
 /**
+ * Helper: Attempt scrape with retries
+ */
+async function attemptScrapeWithRetry(domains: string[], maxRetries = 3): Promise<TrafficData[]> {
+  let lastError;
+
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      if (i > 0) {
+        console.log(`    Retry attempt ${i + 1}/${maxRetries}...`);
+        await new Promise(resolve => setTimeout(resolve, 2000 * i)); // Exponential backoff
+      }
+
+      const results = await scrapeTrafficData(domains, false);
+
+      // If any result has a critical error (like "Proxy Error"), consider it a failure for the batch
+      // But "No valid data" is a valid result (just empty), so we don't retry for that
+      const criticalError = results.find(r => r.error && !r.error.includes('No valid data'));
+
+      if (!criticalError && results.length === domains.length) {
+        return results;
+      }
+
+      lastError = criticalError?.error || 'Incomplete results';
+
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : 'Unknown error';
+    }
+  }
+
+  // If we exhausted retries, return the last attempt's result (or throw)
+  // To keep interface consistent, we'll run one last time to return whatever we get
+  return await scrapeTrafficData(domains, false);
+}
+
+/**
  * Test 1: Basic scraping functionality
  */
 async function testBasicScraping(): Promise<QAResult> {
   const testName = 'Basic Scraping';
   try {
     const testDomains = ['google.com', 'github.com'];
-    const results = await scrapeTrafficData(testDomains, false);
-    
+    const results = await attemptScrapeWithRetry(testDomains);
+
     if (results.length !== testDomains.length) {
       return {
         testName,
@@ -72,7 +107,7 @@ async function testBasicScraping(): Promise<QAResult> {
         error: `Expected ${testDomains.length} results, got ${results.length}`,
       };
     }
-    
+
     const hasErrors = results.some(r => r.error);
     if (hasErrors) {
       const errors = results.filter(r => r.error).map(r => `${r.domain}: ${r.error}`);
@@ -83,7 +118,7 @@ async function testBasicScraping(): Promise<QAResult> {
         details: { errors },
       };
     }
-    
+
     return { testName, passed: true };
   } catch (error) {
     return {
@@ -102,7 +137,7 @@ async function testDataExtraction(): Promise<QAResult> {
   try {
     const testDomains = ['google.com'];
     const results = await scrapeTrafficData(testDomains, false);
-    
+
     if (results.length === 0 || results[0].error) {
       return {
         testName,
@@ -110,24 +145,24 @@ async function testDataExtraction(): Promise<QAResult> {
         error: 'No data extracted',
       };
     }
-    
+
     const result = results[0];
     const issues: string[] = [];
-    
+
     // Check if we got at least one metric
     if (result.monthlyVisits === null && result.avgSessionDuration === null) {
       issues.push('No metrics extracted');
     }
-    
+
     // Validate data formats
     if (result.monthlyVisits !== null && result.monthlyVisits < 0) {
       issues.push('Invalid monthly visits (negative)');
     }
-    
+
     if (result.avgSessionDuration && !/^\d{2}:\d{2}:\d{2}$/.test(result.avgSessionDuration)) {
       issues.push(`Invalid duration format: ${result.avgSessionDuration}`);
     }
-    
+
     if (issues.length > 0) {
       return {
         testName,
@@ -136,7 +171,7 @@ async function testDataExtraction(): Promise<QAResult> {
         details: { result },
       };
     }
-    
+
     return { testName, passed: true, details: { extracted: result } };
   } catch (error) {
     return {
@@ -156,24 +191,24 @@ async function testCacheFunctionality(): Promise<QAResult> {
     const { getDb } = await import('../lib/db');
     const db = getDb();
     const testDomains = ['google.com'];
-    
+
     // First scrape (should populate cache)
-    const firstResults = await scrapeTrafficData(testDomains, false);
+    const firstResults = await attemptScrapeWithRetry(testDomains);
     if (firstResults.length === 0 || firstResults[0].error) {
       return {
         testName,
         passed: false,
-        error: 'Initial scrape failed',
+        error: `Initial scrape failed after retries: ${firstResults[0]?.error || 'No results'}`,
       };
     }
-    
+
     // Store data in cache
     for (const result of firstResults) {
       if (!result.error) {
         storeTrafficData(result);
       }
     }
-    
+
     // Check database cache
     const cached = getLatestTrafficDataBatch(testDomains);
     if (cached.size === 0) {
@@ -183,7 +218,7 @@ async function testCacheFunctionality(): Promise<QAResult> {
         error: 'Data not cached in database',
       };
     }
-    
+
     // Check freshness
     const isFresh = isDataFresh(testDomains[0], 30);
     if (!isFresh) {
@@ -193,7 +228,7 @@ async function testCacheFunctionality(): Promise<QAResult> {
         error: 'Cached data marked as stale incorrectly',
       };
     }
-    
+
     // Cache performance test (should be fast)
     const startTime = Date.now();
     getLatestTrafficDataBatch(testDomains);
@@ -205,7 +240,7 @@ async function testCacheFunctionality(): Promise<QAResult> {
         error: `Cache lookup too slow: ${responseTime}ms (expected < 100ms)`,
       };
     }
-    
+
     // Test www. variations
     const domain = testDomains[0];
     const resultsWithWww = getLatestTrafficDataBatch([`www.${domain}`]);
@@ -217,7 +252,7 @@ async function testCacheFunctionality(): Promise<QAResult> {
         error: 'Cache lookup failed for www. variation',
       };
     }
-    
+
     return { testName, passed: true };
   } catch (error) {
     return {
@@ -236,7 +271,7 @@ async function testOrderPreservation(): Promise<QAResult> {
   try {
     const testDomains = ['google.com', 'github.com', 'example.com'];
     const results = await scrapeTrafficData(testDomains, false);
-    
+
     if (results.length !== testDomains.length) {
       return {
         testName,
@@ -244,12 +279,12 @@ async function testOrderPreservation(): Promise<QAResult> {
         error: `Expected ${testDomains.length} results, got ${results.length}`,
       };
     }
-    
+
     // Check if order matches (allowing for www. variations)
     for (let i = 0; i < testDomains.length; i++) {
       const expected = testDomains[i].toLowerCase().replace(/^www\./, '');
       const actual = results[i].domain.toLowerCase().replace(/^www\./, '');
-      
+
       if (expected !== actual) {
         return {
           testName,
@@ -262,7 +297,7 @@ async function testOrderPreservation(): Promise<QAResult> {
         };
       }
     }
-    
+
     return { testName, passed: true };
   } catch (error) {
     return {
@@ -283,9 +318,9 @@ async function testRealDomainTraffic(): Promise<QAResult> {
     // Test a sample of real domains (not all to keep test fast)
     const sampleDomains = REAL_DOMAIN_TEST_SUITE.slice(0, 5);
     console.log(`  Testing ${sampleDomains.length} real domains...`);
-    
+
     const results = await scrapeTrafficData(sampleDomains, false);
-    
+
     if (results.length === 0) {
       return {
         testName,
@@ -293,21 +328,21 @@ async function testRealDomainTraffic(): Promise<QAResult> {
         error: 'No results returned for real domains',
       };
     }
-    
+
     // Check how many returned valid traffic
     const withTraffic = results.filter(r => !r.error && r.monthlyVisits !== null && r.monthlyVisits > 0);
     const withZero = results.filter(r => r.monthlyVisits === 0);
     const withErrors = results.filter(r => r.error);
-    
+
     // At least 60% should have traffic (some might legitimately have low/no traffic)
     const successRate = withTraffic.length / results.length;
-    
+
     if (successRate < 0.6) {
       const failedDomains = results
         .filter(r => !r.monthlyVisits || r.monthlyVisits === 0)
         .map(r => `${r.domain}: ${r.error || 'zero visits'}`)
         .join(', ');
-      
+
       return {
         testName,
         passed: false,
@@ -321,10 +356,10 @@ async function testRealDomainTraffic(): Promise<QAResult> {
         },
       };
     }
-    
-    return { 
-      testName, 
-      passed: true, 
+
+    return {
+      testName,
+      passed: true,
       details: {
         total: results.length,
         withTraffic: withTraffic.length,
@@ -349,7 +384,7 @@ async function testErrorHandling(): Promise<QAResult> {
     // Test with invalid domain (should return monthlyVisits: 0 for "No valid data")
     const invalidDomains = ['invalid-domain-that-does-not-exist-12345.com'];
     const results = await scrapeTrafficData(invalidDomains, false);
-    
+
     if (results.length === 0) {
       return {
         testName,
@@ -357,7 +392,7 @@ async function testErrorHandling(): Promise<QAResult> {
         error: 'No result returned for invalid domain',
       };
     }
-    
+
     // For "No valid data" domains, we return monthlyVisits: 0 (not an error)
     // This is correct behavior - the system handles it gracefully
     const result = results[0];
@@ -366,12 +401,12 @@ async function testErrorHandling(): Promise<QAResult> {
       // The result should still be returned (not null/undefined)
       return { testName, passed: true, details: { handled: true, error: result.error } };
     }
-    
+
     // Valid result (either with data or monthlyVisits: 0 for no data)
     if (result.monthlyVisits === 0 || result.monthlyVisits !== null) {
       return { testName, passed: true, details: { handled: true, monthlyVisits: result.monthlyVisits } };
     }
-    
+
     return { testName, passed: true };
   } catch (error) {
     return {
@@ -423,7 +458,7 @@ export async function runQATests(): Promise<QAReport> {
   console.log('🚀 Starting QA Agent Tests...');
   const timestamp = new Date().toISOString();
   const results: QAResult[] = [];
-  
+
   // Run all tests
   const tests = [
     testBasicScraping,
@@ -433,20 +468,20 @@ export async function runQATests(): Promise<QAReport> {
     testRealDomainTraffic,  // New: Test real domains with expected traffic
     testErrorHandling,
   ];
-  
+
   for (const test of tests) {
     console.log(`Running: ${test.name}...`);
     const result = await test();
     results.push(result);
-    
+
     if (!result.passed) {
       console.log(`❌ ${result.testName} FAILED: ${result.error}`);
-      
+
       // Attempt auto-fix for specific errors
       // Initial fix attempt
       let initialFixAttempted = false;
       let initialFixSucceeded = false;
-      
+
       if (result.error?.includes('scraping') || result.error?.includes('browserType')) {
         initialFixAttempted = true;
         const fixResult = await autoFixScrapingErrors();
@@ -456,7 +491,7 @@ export async function runQATests(): Promise<QAReport> {
           console.log(`✅ Auto-fixed: ${result.testName}`);
         }
       }
-      
+
       if (!initialFixSucceeded && (result.error?.includes('cache') || result.error?.includes('stale'))) {
         initialFixAttempted = true;
         const fixResult = await autoFixStaleCache();
@@ -466,26 +501,26 @@ export async function runQATests(): Promise<QAReport> {
           console.log(`✅ Auto-fixed: ${result.testName}`);
         }
       }
-      
+
       // If initial fix failed, try deep fix strategies
       if (initialFixAttempted && !initialFixSucceeded && result.error) {
         console.log(`\n🧠 Initial fix failed for ${result.testName}, trying deep fix strategies...`);
-        
+
         // Extract domain from error or test name
-        const domainMatch = result.error.match(/([a-z0-9.-]+\.[a-z]{2,})/i) || 
-                          result.testName.match(/([a-z0-9.-]+\.[a-z]{2,})/i);
-        
+        const domainMatch = result.error.match(/([a-z0-9.-]+\.[a-z]{2,})/i) ||
+          result.testName.match(/([a-z0-9.-]+\.[a-z]{2,})/i);
+
         if (domainMatch) {
           const domain = domainMatch[1];
           const { applyDeepFixStrategies } = await import('./deep-fix-agent');
           const deepFixResult = await applyDeepFixStrategies(domain, result.error);
-          
+
           if (deepFixResult.fixed) {
             result.fixed = true;
             result.details = { deepFixAttempts: deepFixResult.attempts };
             console.log(`✅ Deep fix succeeded for ${result.testName}`);
           } else {
-            result.details = { 
+            result.details = {
               deepFixAttempted: true,
               deepFixAttempts: deepFixResult.attempts,
               needsManualIntervention: true,
@@ -498,11 +533,11 @@ export async function runQATests(): Promise<QAReport> {
       console.log(`✅ ${result.testName} PASSED`);
     }
   }
-  
+
   const passed = results.filter(r => r.passed).length;
   const failed = results.filter(r => !r.passed).length;
   const fixed = results.filter(r => r.fixed).length;
-  
+
   const report: QAReport = {
     timestamp,
     totalTests: results.length,
@@ -511,13 +546,13 @@ export async function runQATests(): Promise<QAReport> {
     fixed,
     results,
   };
-  
+
   console.log('\n📊 QA Report:');
   console.log(`Total: ${report.totalTests}`);
   console.log(`Passed: ${report.passed}`);
   console.log(`Failed: ${report.failed}`);
   console.log(`Auto-fixed: ${report.fixed}`);
-  
+
   // Auto-fix workflow: If selector errors detected, run auto-fix agent
   const selectorErrors = report.results
     .filter(r => !r.passed && r.error?.toLowerCase().includes('selector'))
@@ -544,17 +579,17 @@ export async function runQATests(): Promise<QAReport> {
   // 1. Error occurs → notify to fix if needed, if QA agent has fixed or can't fix
   if (report.failed > 0) {
     console.log('\n📧 Sending error notification email...');
-    
+
     // Check if auto-fix was attempted and succeeded
     const autoFixedCount = report.results.filter(r => r.fixed).length;
     const needsManualFix = report.failed - autoFixedCount;
-    
+
     const emailSent = await sendQAErrorEmail({
       ...report,
       autoFixed: autoFixedCount,
       needsManualFix,
     });
-    
+
     if (emailSent) {
       console.log('✅ Error notification email sent');
       if (autoFixedCount > 0) {
@@ -567,7 +602,7 @@ export async function runQATests(): Promise<QAReport> {
       console.log('⚠️ Failed to send error notification email (check email configuration)');
     }
   }
-  
+
   return report;
 }
 
@@ -587,7 +622,7 @@ if (require.main === module) {
       const reportFile = path.join(reportDir, `qa-report-${Date.now()}.json`);
       fs.writeFileSync(reportFile, JSON.stringify(report, null, 2));
       console.log(`\n📄 Report saved to: ${reportFile}`);
-      
+
       // Exit with error code if tests failed
       process.exit(report.failed > 0 ? 1 : 0);
     })

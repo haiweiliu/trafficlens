@@ -19,7 +19,7 @@ const CONFIGS = [
     },
     {
         name: 'STICKY (Session)',
-        username: 'proxyming123-zone-resi-session-821c97c57521-sessTime-120'
+        username: `proxyming123-zone-resi-session-${Math.random().toString(36).substring(2, 10)}-sessTime-30`
     }
 ];
 
