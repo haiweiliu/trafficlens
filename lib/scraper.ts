@@ -13,7 +13,7 @@ import { extractHistoricalMonths, HistoricalMonthData } from './historical-extra
  * - Vercel: Uses @sparticuz/chromium (serverless-compatible)
  * - Railway/Local: Uses regular Playwright (full filesystem access)
  */
-async function getChromiumBrowser() {
+async function getChromiumBrowser(proxyConfig?: { server: string; username?: string; password?: string } | null) {
   const isVercel = !!(
     process.env.VERCEL ||
     process.env.VERCEL_ENV ||
@@ -25,10 +25,19 @@ async function getChromiumBrowser() {
     const { chromium } = await import('playwright-core');
     const Chromium = (await import('@sparticuz/chromium')).default;
 
+    const args = [...Chromium.args];
+    // FORCE DIRECT if explicit null is passed (meaning "no proxy please")
+    // proxyConfig === undefined means "use defaults" (if we had any for Vercel, which we don't usually)
+    // proxyConfig === null means "direct connection"
+    if (proxyConfig === null) {
+      args.push('--no-proxy-server');
+    }
+
     return chromium.launch({
       headless: true,
       executablePath: await Chromium.executablePath(),
-      args: Chromium.args,
+      args,
+      proxy: proxyConfig || undefined,
     });
   } else {
     // Railway/Local: Use regular Playwright
@@ -39,6 +48,41 @@ async function getChromiumBrowser() {
     let proxyUsername = process.env.PROXY_USERNAME;
     let proxyPassword = process.env.PROXY_PASSWORD;
     const proxyscrapeKey = process.env.PROXYSCRAPE_API_KEY;
+
+    // IF proxyConfig is explicitly provided (not null/undefined), use it
+    if (proxyConfig) {
+      // It's a custom proxy object
+      return chromium.launch({
+        headless: true,
+        proxy: proxyConfig,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--disable-gpu',
+        ]
+      });
+    }
+
+    // IF proxyConfig is explicit NULL, it means "Force Direct / No Proxy"
+    if (proxyConfig === null) {
+      return chromium.launch({
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--disable-gpu',
+          '--no-proxy-server' // <--- CRITICAL FIX
+        ]
+      });
+    }
+
+    // OTHERWISE (undefined): Apply Defaults (PyProxy / ProxyScrape)
 
     // Default to PyProxy Sticky IP if no manual proxy is set
     // WE USE STICKY IP (Session) for better speed/success rate, with random session ID to avoid collisions
@@ -56,11 +100,6 @@ async function getChromiumBrowser() {
     // I will keep the PROXY_URL check logic but prioritize the PyProxy default if nothing is set.]
 
     // If no manual proxy but API key exists (and we didn't set PyProxy above), fetch a dynamic one
-    // Note: The previous logic was "if !proxyServer && key". 
-    // Since we now set proxyServer for PyProxy default, this block will effectively be skipped unless we change logic.
-    // However, if the user explicitly wants to use ProxyScrape, they might not set PROXY_URL but providing the KEY.
-    // So to be safe, let's only use PyProxy if NO config is present at all.
-
     if (!proxyServer && proxyscrapeKey) {
       try {
         console.log('Fetching fresh proxy from ProxyScrape...');
@@ -114,10 +153,14 @@ async function getChromiumBrowser() {
  * Scrapes traffic data from Traffic.cv bulk endpoint
  * @param domains Array of domains (max 10 per call)
  * @param dryRun If true, returns mock data without scraping
+ * @param useProxy If true, uses Default Proxy (PyProxy/Env). If false, forces DIRECT.
+ * @param customProxy Optional custom proxy configuration
  */
 export async function scrapeTrafficData(
   domains: string[],
-  dryRun: boolean = false
+  dryRun: boolean = false,
+  useProxy: boolean = true, // Default to using proxy in prod, but allow opt-out
+  customProxy?: { server: string; username?: string; password?: string }
 ): Promise<TrafficData[]> {
   if (dryRun) {
     return generateMockData(domains);
@@ -151,7 +194,23 @@ export async function scrapeTrafficData(
 
   try {
     // Launch Chromium browser (auto-detects Vercel vs Railway/Local)
-    browser = await getChromiumBrowser();
+    // Determine the proxy config to pass to getChromiumBrowser
+    // Logic:
+    // 1. customProxy provided -> Use it
+    // 2. useProxy === false -> Pass NULL (Force Direct)
+    // 3. useProxy === true (default) -> Pass UNDEFINED (Let defaults/env handle it)
+
+    let proxyArg: { server: string; username?: string; password?: string } | null | undefined;
+
+    if (customProxy) {
+      proxyArg = customProxy;
+    } else if (!useProxy) {
+      proxyArg = null; // Signal to force direct
+    } else {
+      proxyArg = undefined; // Signal to use defaults
+    }
+
+    browser = await getChromiumBrowser(proxyArg);
 
     const context = await browser.newContext({
       userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
