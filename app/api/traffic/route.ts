@@ -120,7 +120,7 @@ async function scrapeInBackground(
     const batchProcessor = async (batch: string[], batchIndex: number) => {
       console.log(`[Background] Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} domains)`);
       try {
-        const batchResults = await scrapeTrafficData(batch, false);
+        const batchResults = await scrapeTrafficData(batch, false, false);
 
         // Store results in database (including errors)
         for (const result of batchResults) {
