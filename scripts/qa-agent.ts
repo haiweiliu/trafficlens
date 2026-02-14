@@ -136,7 +136,7 @@ async function testDataExtraction(): Promise<QAResult> {
   const testName = 'Data Extraction';
   try {
     const testDomains = ['google.com'];
-    const results = await scrapeTrafficData(testDomains, false);
+    const results = await scrapeTrafficData(testDomains, false, false);
 
     if (results.length === 0 || results[0].error) {
       return {
