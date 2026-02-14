@@ -56,7 +56,7 @@ export async function autoFixSelectorErrors(
     try {
       // Test selectors for this domain
       const testResults = await testSelectorsForDomain(domain);
-      
+
       // Generate fix suggestions
       const suggestions = generateFixSuggestions(error, testResults);
       report.suggestions = suggestions;
@@ -64,7 +64,7 @@ export async function autoFixSelectorErrors(
       // Save fix suggestions to file
       const fixFile = path.join(fixesDir, `fix-${domain}-${Date.now()}.md`);
       fs.writeFileSync(fixFile, suggestions);
-      
+
       console.log(`   ✅ Fix suggestions saved to: ${fixFile}`);
 
       if (testResults.workingSelectors.length > 0) {
@@ -94,7 +94,7 @@ export async function runAutoFixWorkflow(failedDomains?: Array<{ domain: string;
   console.log('🚀 Starting Auto-Fix Agent Workflow...\n');
 
   let errors: Array<{ domain: string; error: string }>;
-  
+
   if (failedDomains && failedDomains.length > 0) {
     // Use provided failed domains
     errors = failedDomains.filter(e => e.error.toLowerCase().includes('selector'));
@@ -103,10 +103,10 @@ export async function runAutoFixWorkflow(failedDomains?: Array<{ domain: string;
     // Test domains that commonly fail
     const testDomains = ['iambrandluxury.com', 'example.com'];
     console.log(`Testing ${testDomains.length} domains for errors...`);
-    const results = await scrapeTrafficData(testDomains, false);
+    const results = await scrapeTrafficData(testDomains, false, false);
     errors = detectErrors(results);
   }
-  
+
   if (errors.length === 0) {
     console.log('✅ No selector errors detected. System is healthy!');
     return;

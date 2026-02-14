@@ -4,7 +4,7 @@
 # Run this script once to schedule daily QA tests
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CRON_JOB="0 2 * * * cd $SCRIPT_DIR/.. && npm run qa:daily >> logs/qa-agent.log 2>&1"
+CRON_JOB="0 * * * * cd $SCRIPT_DIR/.. && npm run qa:daily >> logs/qa-agent.log 2>&1"
 
 # Add to crontab
 (crontab -l 2>/dev/null; echo "$CRON_JOB") | crontab -

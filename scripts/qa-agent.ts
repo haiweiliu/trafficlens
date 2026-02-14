@@ -69,7 +69,7 @@ async function attemptScrapeWithRetry(domains: string[], maxRetries = 3): Promis
         await new Promise(resolve => setTimeout(resolve, 2000 * i)); // Exponential backoff
       }
 
-      const results = await scrapeTrafficData(domains, false);
+      const results = await scrapeTrafficData(domains, false, false);
 
       // If any result has a critical error (like "Proxy Error"), consider it a failure for the batch
       // But "No valid data" is a valid result (just empty), so we don't retry for that
@@ -88,7 +88,7 @@ async function attemptScrapeWithRetry(domains: string[], maxRetries = 3): Promis
 
   // If we exhausted retries, return the last attempt's result (or throw)
   // To keep interface consistent, we'll run one last time to return whatever we get
-  return await scrapeTrafficData(domains, false);
+  return await scrapeTrafficData(domains, false, false);
 }
 
 /**
