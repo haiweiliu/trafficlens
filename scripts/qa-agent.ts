@@ -319,7 +319,7 @@ async function testRealDomainTraffic(): Promise<QAResult> {
     const sampleDomains = REAL_DOMAIN_TEST_SUITE.slice(0, 5);
     console.log(`  Testing ${sampleDomains.length} real domains...`);
 
-    const results = await scrapeTrafficData(sampleDomains, false);
+    const results = await scrapeTrafficData(sampleDomains, false, false);
 
     if (results.length === 0) {
       return {
@@ -383,7 +383,7 @@ async function testErrorHandling(): Promise<QAResult> {
   try {
     // Test with invalid domain (should return monthlyVisits: 0 for "No valid data")
     const invalidDomains = ['invalid-domain-that-does-not-exist-12345.com'];
-    const results = await scrapeTrafficData(invalidDomains, false);
+    const results = await scrapeTrafficData(invalidDomains, false, false);
 
     if (results.length === 0) {
       return {
