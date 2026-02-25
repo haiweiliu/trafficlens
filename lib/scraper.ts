@@ -151,6 +151,32 @@ async function getChromiumBrowser(proxyConfig?: { server: string; username?: str
   }
 }
 
+// Global singleton browser instance to avoid recreating Playwright per batch
+// Drastically saves threads (prevents pthread_create SIGTRAP) on Railway
+let globalBrowser: Browser | null = null;
+let browserLaunchPromise: Promise<Browser> | null = null;
+
+async function getSharedBrowser(proxyConfig?: any): Promise<Browser> {
+  if (globalBrowser && globalBrowser.isConnected()) {
+    return globalBrowser;
+  }
+
+  if (browserLaunchPromise) {
+    const b = await browserLaunchPromise;
+    if (b.isConnected()) return b;
+  }
+
+  browserLaunchPromise = getChromiumBrowser(proxyConfig);
+  try {
+    globalBrowser = await browserLaunchPromise;
+    return globalBrowser;
+  } catch (error) {
+    browserLaunchPromise = null;
+    globalBrowser = null;
+    throw error;
+  }
+}
+
 /**
  * Scrapes traffic data from Traffic.cv bulk endpoint
  * @param domains Array of domains (max 10 per call)
@@ -212,9 +238,10 @@ export async function scrapeTrafficData(
       proxyArg = undefined; // Signal to use defaults
     }
 
-    browser = await getChromiumBrowser(proxyArg);
+    browser = await getSharedBrowser(proxyArg);
 
-    const context = await browser.newContext({
+    // Create a new context per page request, not a full browser
+    context = await browser.newContext({
       userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       ignoreHTTPSErrors: true,
     });
@@ -546,8 +573,9 @@ export async function scrapeTrafficData(
       error: error instanceof Error ? error.message : 'Unknown error',
     }));
   } finally {
-    if (browser) {
-      await browser.close();
+    // Only close the context to free memory, keep the global browser alive
+    if (context) {
+      await context.close().catch(() => { });
     }
   }
 }
