@@ -77,6 +77,8 @@ async function getChromiumBrowser(proxyConfig?: { server: string; username?: str
           '--disable-accelerated-2d-canvas',
           '--no-first-run',
           '--disable-gpu',
+          '--disable-site-isolation-trials', // Aggressive memory saving
+          '--js-flags="--max-old-space-size=512"', // Limit V8 memory
           '--no-proxy-server' // <--- CRITICAL FIX
         ]
       });
