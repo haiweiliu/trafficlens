@@ -250,7 +250,7 @@ export async function scrapeTrafficData(
     const page = await context.newPage();
 
     // Optimize: Block unnecessary resources for faster loading
-    await page.route('**/*', (route) => {
+    await page.route('**/*', (route: any) => {
       const resourceType = route.request().resourceType();
       // Block images, fonts, stylesheets, media, websocket, manifest, other
       if (['image', 'stylesheet', 'font', 'media', 'websocket', 'manifest', 'other'].includes(resourceType)) {
@@ -345,7 +345,7 @@ export async function scrapeTrafficData(
         const isRailwayEnv = isRailway;
 
         // Inject values into page context for the waitForFunction
-        await page.evaluate(({ expectedCount, isRailwayEnv }) => {
+        await page.evaluate(({ expectedCount, isRailwayEnv }: { expectedCount: number, isRailwayEnv: boolean }) => {
           (window as any).__expectedCount = expectedCount;
           (window as any).__isRailwayEnv = isRailwayEnv;
         }, { expectedCount, isRailwayEnv });
