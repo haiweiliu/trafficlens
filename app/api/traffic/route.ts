@@ -44,8 +44,9 @@ interface TrafficResponse {
 
 /**
  * Rate limiting: delay between batches (in milliseconds)
+ * Increased to 10s to ensure OS completely reaps Chromium zombie threads (preventing ulimit/pthread_create crashes)
  */
-const BATCH_DELAY_MS = 2000;
+const BATCH_DELAY_MS = 10000;
 
 /**
  * Number of parallel batches to process

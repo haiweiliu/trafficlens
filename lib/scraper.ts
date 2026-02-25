@@ -14,17 +14,14 @@ import { extractHistoricalMonths, HistoricalMonthData } from './historical-extra
  * - Railway/Local: Uses regular Playwright (full filesystem access)
  */
 async function getChromiumBrowser(proxyConfig?: { server: string; username?: string; password?: string } | null) {
-  const isServerless = !!(
+  const isVercel = !!(
     process.env.VERCEL ||
     process.env.VERCEL_ENV ||
-    process.env.NEXT_PUBLIC_VERCEL_URL ||
-    process.env.RAILWAY_ENVIRONMENT_NAME ||
-    process.env.RAILWAY_PROJECT_ID ||
-    process.env.NODE_ENV === 'production'
+    process.env.NEXT_PUBLIC_VERCEL_URL
   );
 
-  if (isServerless) {
-    // Production (Vercel/Railway): Use serverless-compatible Chromium
+  if (isVercel) {
+    // Vercel: Use serverless-compatible Chromium
     const { chromium } = await import('playwright-core');
     const Chromium = (await import('@sparticuz/chromium')).default;
 
@@ -82,8 +79,6 @@ async function getChromiumBrowser(proxyConfig?: { server: string; username?: str
           '--disable-gpu',
           '--disable-site-isolation-trials', // Aggressive memory saving
           '--js-flags="--max-old-space-size=512"', // Limit V8 memory
-          '--single-process', // CRITICAL FIX for pthread_create Resource temporarily unavailable
-          '--no-zygote',      // CRITICAL FIX paired with single-process
           '--no-proxy-server' // <--- CRITICAL FIX
         ]
       });
