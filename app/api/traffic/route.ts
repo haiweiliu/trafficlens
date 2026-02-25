@@ -115,8 +115,8 @@ async function scrapeInBackground(
 
     console.log(`[Background] Starting scrape for ${cacheMisses.length} domains...`);
 
-    // Split into batches of 10 (Traffic.cv limit)
-    const batches = chunkArray(cacheMisses, 10);
+    // Split into micro-batches of 3 explicitly to prevent Railway Playwright OOM (pthread_create limit)
+    const batches = chunkArray(cacheMisses, 3);
     const allResults: TrafficData[] = [];
 
     const batchProcessor = async (batch: string[], batchIndex: number) => {
