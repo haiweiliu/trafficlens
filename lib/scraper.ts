@@ -219,6 +219,7 @@ export async function scrapeTrafficData(
 
   const url = `https://traffic.cv/bulk?domains=${normalizedForQuery.join(',')}`;
   let browser: Browser | null = null;
+  let context: any = null;
 
   try {
     // Launch Chromium browser (auto-detects Vercel vs Railway/Local)
