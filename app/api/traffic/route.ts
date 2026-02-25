@@ -49,8 +49,9 @@ const BATCH_DELAY_MS = 2000;
 
 /**
  * Number of parallel batches to process
+ * Reduced from 5 to 1 to prevent Playwright OOM (SIGTRAP) crashes on Railway Railway nodes 
  */
-const PARALLEL_BATCHES = 5;
+const PARALLEL_BATCHES = 1;
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
