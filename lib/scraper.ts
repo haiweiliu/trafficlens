@@ -79,6 +79,8 @@ async function getChromiumBrowser(proxyConfig?: { server: string; username?: str
           '--disable-gpu',
           '--disable-site-isolation-trials', // Aggressive memory saving
           '--js-flags="--max-old-space-size=512"', // Limit V8 memory
+          '--single-process', // CRITICAL FIX for pthread_create Resource temporarily unavailable
+          '--no-zygote',      // CRITICAL FIX paired with single-process
           '--no-proxy-server' // <--- CRITICAL FIX
         ]
       });
