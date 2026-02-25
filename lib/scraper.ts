@@ -14,14 +14,17 @@ import { extractHistoricalMonths, HistoricalMonthData } from './historical-extra
  * - Railway/Local: Uses regular Playwright (full filesystem access)
  */
 async function getChromiumBrowser(proxyConfig?: { server: string; username?: string; password?: string } | null) {
-  const isVercel = !!(
+  const isServerless = !!(
     process.env.VERCEL ||
     process.env.VERCEL_ENV ||
-    process.env.NEXT_PUBLIC_VERCEL_URL
+    process.env.NEXT_PUBLIC_VERCEL_URL ||
+    process.env.RAILWAY_ENVIRONMENT_NAME ||
+    process.env.RAILWAY_PROJECT_ID ||
+    process.env.NODE_ENV === 'production'
   );
 
-  if (isVercel) {
-    // Vercel: Use serverless-compatible Chromium
+  if (isServerless) {
+    // Production (Vercel/Railway): Use serverless-compatible Chromium
     const { chromium } = await import('playwright-core');
     const Chromium = (await import('@sparticuz/chromium')).default;
 
