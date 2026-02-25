@@ -79,7 +79,7 @@ async function heal() {
             })
         });
 
-        const data = await response.json();
+        const data = await response.json() as any;
         const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
         if (!rawText) {
@@ -87,8 +87,8 @@ async function heal() {
             return;
         }
 
-        const jsonStr = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
-        const fixes = JSON.parse(jsonStr);
+        const jsonStr: string = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+        const fixes: any[] = JSON.parse(jsonStr);
 
         // Instead of auto-applying, we save the proposal for review
         const proposalPath = path.join(process.cwd(), 'logs/proposed-fix.json');
@@ -98,7 +98,7 @@ async function heal() {
         // Send a report
         if (RESEND_API_KEY) {
             const resend = new Resend(RESEND_API_KEY);
-            const fixSummary = fixes.map(f => f.filepath).join(', ');
+            const fixSummary = fixes.map((f: any) => f.filepath).join(', ');
 
             await resend.emails.send({
                 from: 'onboarding@resend.dev',
@@ -113,8 +113,8 @@ async function heal() {
             console.log("📧 Proposal notification sent.");
         }
 
-    } catch (error) {
-        console.error("💥 Healer crashed:", error);
+    } catch (error: any) {
+        console.error("💥 Healer crashed:", error.message || error);
     }
 }
 
