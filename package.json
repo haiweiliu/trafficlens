@@ -19,6 +19,8 @@
     "qa:loop": "tsx scripts/ralph-wiggum-agent.ts",
     "qa:loop:full": "tsx scripts/ralph-wiggum-agent.ts --full",
     "qa:loop:quick": "tsx scripts/ralph-wiggum-agent.ts --quick",
+    "health:check": "tsx scripts/playwright-health-cron.ts",
+    "health:cron:setup": "bash scripts/setup-health-cron.sh",
     "test:email": "tsx scripts/test-email.ts",
     "data:quality": "tsx scripts/data-quality-agent.ts",
     "pre-deploy": "tsx scripts/pre-deployment-agent.ts",
