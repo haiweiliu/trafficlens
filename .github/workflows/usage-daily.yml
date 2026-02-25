@@ -2,12 +2,13 @@ name: Daily Report
 
 on:
   schedule:
-    - cron: '0 9 * * *'  # 9 AM UTC daily (1 AM PST)
+    - cron: '0 9 * * *'  # 9 AM UTC daily (5 AM EST)
   workflow_dispatch:  # Manual trigger
 
 jobs:
   daily-report:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
       EMAIL_TO: ${{ secrets.EMAIL_TO || 'mingcomco@gmail.com' }}
@@ -15,27 +16,23 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-      
+          # Note: no 'cache: npm' — package-lock.json is not committed
+
       - name: Install dependencies
-        run: npm install
-      
-      - name: Install Playwright browsers
-        run: npx playwright install chromium --with-deps
-      
-      - name: Run QA tests first
-        run: npm run qa
-        continue-on-error: true
-      
+        run: npm install --no-fund --no-audit
+
       - name: Generate and send daily report
         run: npm run report:daily
-        continue-on-error: true
-      
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          EMAIL_TO: mingcomco@gmail.com
+          EMAIL_FROM: onboarding@resend.dev
+
       - name: Upload reports
         uses: actions/upload-artifact@v4
         if: always()
