@@ -257,8 +257,16 @@ async function performScrape(
 
     // Create a new context per page request, not a full browser
     context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
       ignoreHTTPSErrors: true,
+      viewport: { width: 1440, height: 900 },
+      locale: 'en-US',
+      timezoneId: 'America/New_York',
+      extraHTTPHeaders: {
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Upgrade-Insecure-Requests': '1',
+      },
     });
 
     const page = await context.newPage();
@@ -499,9 +507,20 @@ async function performScrape(
       return genericResults;
     }
 
-    const errorMsg = resultsFound
+    // DIAGNOSTIC (V46.0): Surface what the page actually showed so API callers
+    // can distinguish Cloudflare challenges from selector drift without log access.
+    let diagTitle = '';
+    let diagSnippet = '';
+    try {
+      diagTitle = await page.title();
+      const bodyText = await page.textContent('body') || '';
+      diagSnippet = bodyText.replace(/\s+/g, ' ').trim().slice(0, 160);
+    } catch (e) { /* best effort */ }
+
+    const baseMsg = resultsFound
       ? 'No data found on page (selectors may need update)'
       : 'Page did not load results (timeout or structure changed)';
+    const errorMsg = `${baseMsg} | page title: "${diagTitle}" | body: "${diagSnippet}"`;
 
     return domains.map(domain => ({
       domain,
