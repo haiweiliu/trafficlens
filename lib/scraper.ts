@@ -107,6 +107,8 @@ async function getChromiumBrowser(proxyConfig?: { server: string; username?: str
       '--disable-accelerated-2d-canvas',
       '--no-first-run',
       '--disable-gpu',
+      '--disable-site-isolation-trials',
+      '--disable-features=IsolateOrigins,site-per-process',
       '--no-proxy-server' // FORCE DIRECT
     ];
 
@@ -191,8 +193,8 @@ export async function scrapeTrafficData(
     throw new Error('Maximum 10 domains per batch');
   }
 
-  // Acquire concurrency lock (Browser Bomb protection)
-  await acquireScrapingLock();
+  // Acquire concurrency lock (Bypassed for Extreme Acceleration)
+  // await acquireScrapingLock();
 
   try {
     // Hard Safety Timeout: 45 seconds total for the entire operation
@@ -206,8 +208,8 @@ export async function scrapeTrafficData(
       )
     ]);
   } finally {
-    // CRITICAL: Always release the lock
-    releaseScrapingLock();
+    // CRITICAL (Bypassed): Always release the lock
+    // releaseScrapingLock();
   }
 }
 
@@ -463,15 +465,17 @@ async function performScrape(
           if (retryResults.length > 0 && !retryResults[0].error) {
             cardResults.push(retryResults[0]);
           } else {
+            // CRITICAL FIX V21.0: Never default to 0 if we found the domain but extraction failed.
+            // This prevents false-negatives (Guardian.com anomaly).
             cardResults.push({
               domain,
-              monthlyVisits: 0,
+              monthlyVisits: null,
               avgSessionDuration: null,
               avgSessionDurationSeconds: null,
               bounceRate: null,
               pagesPerVisit: null,
               checkedAt: null,
-              error: null,
+              error: 'Verification timeout: Domain found on page but cards failed to load.',
             });
           }
         } else {
@@ -871,24 +875,30 @@ async function extractFromCards(page: Page, domains: string[]): Promise<TrafficD
           domain = matchedDomain;
         }
 
-        // Extract "Total Visits" - optimized patterns, handle B (billion) suffix
-        // Format: "Total Visits 82.28B" or "Total Visits: 3.72K" or "Total Visits4.57K"
+        // Extract "Total Visits" - updated for new traffic.cv direct adjacency
         let monthlyVisits: number | null = null;
-        const visitsPatterns = [
-          /Total\s+Visits[:\s]+([\d.,]+\s*[KMkmBb]?)/i,
-          /Total\s+Visits\s+([\d.,]+\s*[KMkmBb]?)/i,
-          /Total\s+Visits([\d.,]+\s*[KMkmBb]?)/i,  // No space/colon
-        ];
+        
+        // NEW (Mar 31): Enhanced DOM extraction for Next.js layout
+        // We look for any div containing 'Total Visits' then find the adjacent bold value
+        const cardHTML = await card.innerHTML();
+        if (cardHTML.includes('Total Visits')) {
+           const visitsPatterns = [
+             /Total\s+Visits[^>]*>[\s\S]*?<div[^>]*class="[^"]*font-semibold[^"]*"[^>]*>([\d.,]+\s*[KMkmBb]?)/i,
+             /Total\s+Visits[:\s]*([\d.,]+\s*[KMkmBb]?)/i,
+             /Total\s+Visits\s+([\d.,]+\s*[KMkmBb]?)/i,
+             /Total\s+Visits([\d.,]+\s*[KMkmBb]?)/i,
+           ];
 
-        for (const pattern of visitsPatterns) {
-          const match = cardText.match(pattern);
-          if (match && match[1]) {
-            const parsed = parseNumberWithSuffix(match[1].trim());
-            if (parsed && parsed > 0) {
-              monthlyVisits = parsed;
-              break;
-            }
-          }
+           for (const pattern of visitsPatterns) {
+             const match = cardHTML.match(pattern) || cardText.match(pattern);
+             if (match && match[1]) {
+               const parsed = parseNumberWithSuffix(match[1].trim());
+               if (parsed && parsed > 0) {
+                 monthlyVisits = parsed;
+                 break;
+               }
+             }
+           }
         }
 
         // Context search if direct pattern fails
@@ -910,8 +920,8 @@ async function extractFromCards(page: Page, domains: string[]): Promise<TrafficD
         let avgSessionDuration: string | null = null;
         let avgSessionDurationSeconds: number | null = null;
         const durationPatterns = [
-          /Avg\.?\s*Duration[:\s]+(\d{2}:\d{2}:\d{2})/i,
-          /Duration[:\s]+(\d{2}:\d{2}:\d{2})/i,
+          /Avg\.?\s*Duration[:\s]*(\d{2}:\d{2}:\d{2})/i, // Optional space/colon
+          /Duration[:\s]*(\d{2}:\d{2}:\d{2})/i,
           /(\d{2}:\d{2}:\d{2})/,
         ];
 
@@ -929,13 +939,11 @@ async function extractFromCards(page: Page, domains: string[]): Promise<TrafficD
         }
 
         // Extract "Pages per Visit" - format is usually "3.13" or "1.68" or "8.62"
-        // Look for "Pages per Visit" or "Pages/Visit" label - must be exact match
         let pagesPerVisit: number | null = null;
         const pagesPatterns = [
-          /Pages\s+per\s+Visit[:\s]+([\d.]+)/i,
-          /Pages\/Visit[:\s]+([\d.]+)/i,
+          /Pages\s+per\s+Visit[:\s]*([\d.]+)/i, // Optional space/colon
+          /Pages\/Visit[:\s]*([\d.]+)/i,
           /Pages\s+per\s+Visit\s+([\d.]+)/i,
-          /Pages\s+per\s+Visit([\d.]+)/i,  // No space/colon
         ];
 
         for (const pattern of pagesPatterns) {
@@ -980,12 +988,10 @@ async function extractFromCards(page: Page, domains: string[]): Promise<TrafficD
         }
 
         // Extract "Bounce Rate" - format is "31.93%" or "46.38%"
-        // Look for "Bounce Rate" label followed by percentage
         let bounceRate: number | null = null;
         const bouncePatterns = [
-          /Bounce\s+Rate[:\s]+([\d.]+)%/i,
+          /Bounce\s+Rate[:\s]*([\d.]+)%/i, // Optional space/colon
           /Bounce\s+Rate\s+([\d.]+)%/i,
-          /Bounce\s+Rate([\d.]+)%/i,  // No space/colon
         ];
 
         for (const pattern of bouncePatterns) {
