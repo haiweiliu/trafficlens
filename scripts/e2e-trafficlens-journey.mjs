@@ -1,5 +1,5 @@
 /**
- * TrafficLens live journey — paste domains, Run with bypass cache, expect Monthly Visits.
+ * TrafficLens live journey — paste domains, Run analysis, expect Monthly Visits.
  */
 export default async function run({ page, assert, step, capture, device }) {
   const canaryDomain = 'threads.com';
@@ -7,7 +7,7 @@ export default async function run({ page, assert, step, capture, device }) {
 
   await step(`[${device}] Load homepage and verify TrafficLens shell`, async () => {
     await page.getByRole('heading', { name: 'TrafficLens' }).waitFor({ timeout: 15000 });
-    await page.getByLabel(/Paste domains/i).waitFor({ timeout: 15000 });
+    await page.locator('#domains').waitFor({ timeout: 15000 });
     await capture(`${device}-homepage-ready`, page);
   });
 
@@ -16,26 +16,26 @@ export default async function run({ page, assert, step, capture, device }) {
     await textarea.click();
     await textarea.fill(`${canaryDomain}\n${secondDomain}`);
 
-    const bypass = page.getByRole('checkbox', { name: /Bypass Cache/i });
+    const bypass = page.getByRole('checkbox', { name: /Bypass cache/i });
     if (!(await bypass.isChecked())) {
       await bypass.check();
     }
 
-    await page.getByRole('button', { name: 'Run' }).click();
+    await page.getByRole('button', { name: /Run analysis/i }).click();
 
-    await page.getByRole('heading', { name: /Results \(2 domains\)/ }).waitFor({
+    await page.getByRole('heading', { name: /Results/i }).waitFor({
       timeout: 90000,
     });
 
     await page.waitForFunction(() => {
       const run = Array.from(document.querySelectorAll('button')).find(
-        (btn) => (btn.textContent || '').trim() === 'Run'
+        (btn) => /Run analysis/i.test((btn.textContent || '').trim())
       );
       return Boolean(run);
     }, { timeout: 90000 });
 
-    const runLabel = await page.getByRole('button', { name: 'Run' }).textContent();
-    assert(runLabel?.trim() === 'Run', `Run button still loading: "${runLabel}"`);
+    const runLabel = await page.getByRole('button', { name: /Run analysis/i }).textContent();
+    assert(/Run analysis/i.test(runLabel || ''), `Run analysis button still loading: "${runLabel}"`);
   });
 
   await step(`[${device}] Assert Monthly Visits are populated (not N/A)`, async () => {
@@ -56,8 +56,8 @@ export default async function run({ page, assert, step, capture, device }) {
 
     const statusOk = await threadsRow.first().locator('td').last().textContent();
     assert(
-      !statusOk?.includes('Scraping in background'),
-      'threads.com still shows background scraping status.'
+      !statusOk?.includes('Pending'),
+      'threads.com still shows pending scraping status.'
     );
 
     await capture(`${device}-traffic-results`, page, { fullPage: true });

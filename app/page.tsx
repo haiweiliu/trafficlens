@@ -4,6 +4,8 @@ import { useState } from "react";
 import TrafficTable from "@/components/TrafficTable";
 import ExportButtons from "@/components/ExportButtons";
 import { TrafficData } from "@/lib/types";
+import { normalizeTrafficResults } from "@/lib/normalize-traffic";
+import type { TrafficData as ApiTrafficData } from "@/types";
 
 export default function Home() {
   const [domains, setDomains] = useState("");
@@ -51,16 +53,18 @@ export default function Home() {
 
       const data = await response.json();
 
-      if (data.backgroundScraping) {
+      const apiResults = (data.results || []) as ApiTrafficData[];
+
+      if (data.metadata?.backgroundScraping ?? data.backgroundScraping) {
         setProgress(
           "Scraping in background — results will appear as they complete."
         );
-        setResults(data.results || []);
+        setResults(normalizeTrafficResults(apiResults));
         setLoading(false);
         pollForResults(domainList);
       } else {
         setProgress(null);
-        setResults(data.results || []);
+        setResults(normalizeTrafficResults(apiResults));
         setLoading(false);
       }
     } catch (err) {
@@ -91,11 +95,11 @@ export default function Home() {
 
         if (response.ok) {
           const data = await response.json();
-          setResults(data.results || []);
+          const apiResults = (data.results || []) as ApiTrafficData[];
+          const normalized = normalizeTrafficResults(apiResults);
+          setResults(normalized);
 
-          const allComplete = data.results?.every(
-            (r: TrafficData) => r.status !== "pending"
-          );
+          const allComplete = normalized.every((r) => r.status !== "pending");
 
           if (allComplete) {
             setProgress("All domains processed.");

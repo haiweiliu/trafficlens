@@ -127,8 +127,8 @@ export default function TrafficTable({ data }: TrafficTableProps) {
     return num.toLocaleString();
   };
 
-  const formatGrowth = (growth: number | null) => {
-    if (growth === null) return "N/A";
+  const formatGrowth = (growth: number | null | undefined) => {
+    if (growth == null) return "N/A";
     const sign = growth >= 0 ? "+" : "";
     return `${sign}${growth.toFixed(1)}%`;
   };
@@ -314,17 +314,17 @@ export default function TrafficTable({ data }: TrafficTableProps) {
                     {formatGrowth(row.growth)}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3.5 text-sm tabular-nums text-zinc-700">
-                    {row.avgDuration !== null
+                    {row.avgDuration != null
                       ? `${row.avgDuration.toFixed(1)}s`
                       : "N/A"}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3.5 text-sm tabular-nums text-zinc-700">
-                    {row.pagesPerVisit !== null
+                    {row.pagesPerVisit != null
                       ? row.pagesPerVisit.toFixed(2)
                       : "N/A"}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3.5 text-sm tabular-nums text-zinc-700">
-                    {row.bounceRate !== null
+                    {row.bounceRate != null
                       ? `${row.bounceRate.toFixed(1)}%`
                       : "N/A"}
                   </td>
