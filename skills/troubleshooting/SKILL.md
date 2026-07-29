@@ -67,6 +67,33 @@ return reorderResults(cardResults, domains);
 2. Purge bad cache: `POST /api/heal` with `x-trafficlens-admin-key`.
 3. Run `npm run health:probe` to verify canaries return visits > 0.
 
+### 5. Railway "This page couldn't load" (white triangle)
+**Symptoms:**
+- Browser shows Railway white triangle — **"This page couldn't load"**.
+- `curl /api/health` or `/api/traffic` may still return JSON intermittently.
+- **Not** a Next.js client crash or ChunkLoadError.
+
+**Causes:**
+- Node process **OOM-killed** by concurrent Playwright (`PARALLEL_BATCHES` > 1 on single-container Railway).
+- Redeploy gap — no `healthcheckPath`; traffic routed before process ready.
+- Cursor embedded browser cached a failed navigation.
+
+**Resolution:**
+1. Confirm liveness: `curl -sf https://trafficlens.up.railway.app/api/health`.
+2. Set **`TL_PARALLEL_BATCHES=1`** on Railway (mandatory for single-container).
+3. Verify `railway.json` has `healthcheckPath: /api/health` and `next start -H 0.0.0.0`.
+4. Hard refresh browser (Cmd+Shift+R) before declaring UI regression.
+5. Check Railway deploy logs for OOM / SIGKILL — not application stack traces.
+
+### 6. Liveness vs data-quality probes
+| Probe | Endpoint | Purpose |
+|-------|----------|---------|
+| **Liveness** | `GET /api/health` | Railway routing; no Playwright |
+| **Functional canary** | `npm run health:probe` | Asserts canary domains have `monthlyVisits > 0` |
+| **Heal** | `POST /api/heal` | Purges incomplete cache + re-fetch |
+
+Never substitute `/api/health` for scrape-quality verification.
+
 ## 🛠️ Diagnostic Tools
 
 ### Local QA Run
