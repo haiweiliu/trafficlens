@@ -215,8 +215,8 @@ export function storeTrafficDataForMonth(
   const stmt = database.prepare(`
     INSERT INTO traffic_snapshots (
       domain, month_year, monthly_visits, avg_session_duration_seconds,
-      bounce_rate, pages_per_visit, checked_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      bounce_rate, pages_per_visit, checked_at, traffic_sources
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(domain, month_year) DO UPDATE SET
       monthly_visits = excluded.monthly_visits,
       avg_session_duration_seconds = excluded.avg_session_duration_seconds,
