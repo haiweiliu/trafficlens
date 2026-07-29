@@ -68,10 +68,17 @@ const INTER_BATCH_SLEEP_MS = Math.max(
 );
 
 /**
- * Number of parallel batches to process
- * Reduced from 5 to 1 to prevent Playwright OOM (SIGTRAP) crashes on Railway Railway nodes 
+ * Parallel Playwright batches. Default 1 on Railway to avoid OOM killing the whole process.
+ * Override with TL_PARALLEL_BATCHES (e.g. 3 on ScrapeHQ / CPX31).
  */
-const PARALLEL_BATCHES = 3;
+const PARALLEL_BATCHES = Math.max(
+  1,
+  parseInt(
+    process.env.TL_PARALLEL_BATCHES ||
+      (process.env.RAILWAY_ENVIRONMENT ? '1' : '3'),
+    10
+  )
+);
 
 /** Flight-chunk fetch is fast enough to block for typical UI batches (≤10 domains). */
 const SYNC_SCRAPE_LIMIT = Math.min(

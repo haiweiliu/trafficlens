@@ -11,7 +11,7 @@
     "dev": "next dev",
     "build": "next build",
     "postinstall": "if [ -z \"$VERCEL\" ]; then npx playwright install chromium --with-deps; fi",
-    "start": "next start",
+    "start": "next start -H 0.0.0.0 -p ${PORT:-3000}",
     "lint": "next lint",
     "test": "echo \"Error: no test specified\" && exit 1",
     "qa": "tsx scripts/qa-agent.ts",
