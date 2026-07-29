@@ -22,5 +22,6 @@ export interface TrafficResponse {
     cacheHits: number;
     cacheMisses: number;
     errors: string[];
+    backgroundScraping?: boolean;
   };
 }

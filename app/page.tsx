@@ -78,11 +78,20 @@ export default function Home() {
       const cacheHits = data.metadata.cacheHits;
       const cacheMisses = data.metadata.cacheMisses;
       const totalDomains = data.metadata.totalDomains;
-      
-      // Immediate feedback based on cache status
-      if (cacheHits === totalDomains) {
-        // All from cache - instant response!
-        setProgress(`✅ All ${cacheHits} domains served from cache (instant)`);
+      const backgroundScraping = data.metadata.backgroundScraping ?? false;
+      const stillPending = data.results.some(
+        (r) =>
+          r.error?.includes('Still scraping') ||
+          r.error?.includes('Scraping in background')
+      );
+
+      // Sync scrape path: API returns complete rows with backgroundScraping=false
+      if (cacheHits === totalDomains || (!backgroundScraping && !stillPending)) {
+        if (cacheHits === totalDomains) {
+          setProgress(`✅ All ${cacheHits} domains served from cache (instant)`);
+        } else {
+          setProgress(`✅ Done! ${totalDomains} domains loaded.`);
+        }
         setLoading(false);
         setTimeout(() => setProgress(''), 3000);
         return;
