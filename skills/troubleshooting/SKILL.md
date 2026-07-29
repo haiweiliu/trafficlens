@@ -88,15 +88,25 @@ npx tsx scripts/probe_scrape.ts threads.com github.com
 ```
 
 ### Health Cron (Never-Down)
-Probe production canaries + self-heal with free-llm diagnose:
+Daily probe at **06:00 local**; self-heal + free-llm diagnose **only when canaries lack visits**.
+
 ```bash
+# One-shot probe / heal
 npm run health:probe
-TRAFFICLENS_ADMIN_KEY=... npm run health:heal
-bash scripts/install_trafficlens_health_cron.sh
+npm run health:daily                    # probe → heal if unhealthy
+TRAFFICLENS_ADMIN_KEY=... npm run health:heal   # optional — enables POST /api/heal
+
+# Install Mac/VPS cron (06:00 daily)
+npm run health:cron
+# or: bash scripts/install_trafficlens_health_cron.sh
+# Custom hour: TRAFFICLENS_CRON_HOUR=7 bash scripts/install_trafficlens_health_cron.sh
 ```
+
+**GitHub Actions backup:** `.github/workflows/health-daily.yml` runs at 10:00 UTC even when Mac cron is off. Add repo secret `TRAFFICLENS_ADMIN_KEY` (optional) for remote cache purge via `/api/heal`.
 
 From Innovation workspace:
 ```bash
+bash scripts/install_trafficlens_daily_cron.sh
 node scripts/trafficlens_health_bridge.mjs
 ```
 

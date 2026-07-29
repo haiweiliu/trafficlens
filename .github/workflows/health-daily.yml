@@ -1,0 +1,54 @@
+name: Daily Health Probe & Self-Heal
+
+on:
+  schedule:
+    # 10:00 UTC ≈ 06:00 US Eastern (backup when Mac cron is offline)
+    - cron: '0 10 * * *'
+  workflow_dispatch:
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TRAFFICLENS_URL: https://trafficlens.up.railway.app
+      TL_PROBE_WAIT_MS: 120000
+      TRAFFICLENS_ADMIN_KEY: ${{ secrets.TRAFFICLENS_ADMIN_KEY }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install --no-fund --no-audit
+
+      - name: Daily probe (heal only if unhealthy)
+        run: npm run health:daily
+        continue-on-error: true
+
+      - name: Upload health receipts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: health-receipts
+          path: |
+            .runtime/trafficlens-health-probe-latest.json
+            .runtime/trafficlens-self-heal-receipt.json
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## TrafficLens Daily Health" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f .runtime/trafficlens-health-probe-latest.json ]; then
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat .runtime/trafficlens-health-probe-latest.json >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No probe receipt found." >> "$GITHUB_STEP_SUMMARY"
+          fi

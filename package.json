@@ -28,7 +28,9 @@
     "report:daily": "tsx scripts/daily-report.ts",
     "health:probe": "node scripts/trafficlens_health_probe.mjs",
     "health:heal": "node scripts/trafficlens_self_heal.mjs --heal --diagnose",
-    "health:cron": "bash scripts/install_trafficlens_health_cron.sh"
+    "health:daily": "node scripts/trafficlens_daily_cron.mjs",
+    "health:cron": "bash scripts/install_trafficlens_health_cron.sh",
+    "health:cron:install": "bash scripts/install_trafficlens_health_cron.sh"
   },
   "keywords": [],
   "author": "",
