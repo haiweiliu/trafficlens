@@ -2,7 +2,42 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  @apply bg-gray-50 text-gray-900;
+@layer base {
+  body {
+    @apply bg-zinc-50 text-zinc-900 antialiased;
+  }
 }
 
+@layer components {
+  .tl-surface {
+    @apply rounded-xl border border-zinc-200/80 bg-white shadow-sm;
+  }
+
+  .tl-btn {
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 text-sm font-medium transition-colors active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .tl-btn-primary {
+    @apply tl-btn bg-sky-600 text-white hover:bg-sky-700;
+  }
+
+  .tl-btn-secondary {
+    @apply tl-btn border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50;
+  }
+
+  .tl-btn-ghost {
+    @apply tl-btn text-zinc-600 hover:bg-zinc-100;
+  }
+
+  .tl-btn-danger {
+    @apply tl-btn border border-red-200 bg-red-50 text-red-700 hover:bg-red-100;
+  }
+
+  .tl-input {
+    @apply w-full rounded-lg border border-zinc-200 bg-white px-3 py-2.5 text-sm text-zinc-900 shadow-sm placeholder:text-zinc-400 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20;
+  }
+
+  .tl-label {
+    @apply mb-2 block text-sm font-medium text-zinc-700;
+  }
+}

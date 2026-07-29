@@ -1,296 +1,263 @@
-'use client';
+"use client";
 
-import { useState, useRef, useEffect } from 'react';
-import { normalizeDomains, parseDomains } from '@/lib/domain-utils';
-import { TrafficData, TrafficResponse } from '@/types';
-import TrafficTable from '@/components/TrafficTable';
-import ExportButtons from '@/components/ExportButtons';
+import { useState } from "react";
+import TrafficTable from "@/components/TrafficTable";
+import ExportButtons from "@/components/ExportButtons";
+import { TrafficData } from "@/lib/types";
 
 export default function Home() {
-  const [input, setInput] = useState('');
+  const [domains, setDomains] = useState("");
   const [results, setResults] = useState<TrafficData[]>([]);
   const [loading, setLoading] = useState(false);
-  const [progress, setProgress] = useState('');
+  const [error, setError] = useState<string | null>(null);
   const [dryRun, setDryRun] = useState(false);
   const [bypassCache, setBypassCache] = useState(false);
-  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [progress, setProgress] = useState<string | null>(null);
 
-  const handleNormalize = () => {
-    if (!input.trim()) return;
-    try {
-      const parsed = parseDomains(input);
-      const normalized = normalizeDomains(parsed);
-      const domains = normalized.map(d => d.domain);
-      setInput(domains.join('\n'));
-    } catch (error) {
-      alert('Error normalizing domains');
-    }
-  };
-
-  const handleRun = async () => {
-    if (!input.trim()) {
-      alert('Please enter at least one domain');
-      return;
-    }
-
-    if (loading) {
-      return;
-    }
-
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     setLoading(true);
-    setProgress('Checking cache...');
-    setResults([]);
+    setError(null);
+    setProgress(null);
+
+    const domainList = domains
+      .split(/[\n,]/)
+      .map((d) => d.trim())
+      .filter((d) => d.length > 0);
+
+    if (domainList.length === 0) {
+      setError("Please enter at least one domain");
+      setLoading(false);
+      return;
+    }
 
     try {
-      const parsed = parseDomains(input);
-      const normalized = normalizeDomains(parsed);
-      const domainsToCheck = normalized.map(d => d.domain);
+      setProgress(`Analyzing ${domainList.length} domain(s)…`);
 
-      if (domainsToCheck.length === 0) {
-        alert('Please enter at least one valid domain');
-        setLoading(false);
-        return;
-      }
-
-      // Send all domains at once - backend returns cached immediately, scrapes missing in background
-      const response = await fetch('/api/traffic', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+      const response = await fetch("/api/traffic", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          domains: domainsToCheck,
+          domains: domainList,
           dryRun,
           bypassCache,
         }),
       });
 
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to fetch traffic data');
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to fetch traffic data");
       }
 
-      const data: TrafficResponse = await response.json();
+      const data = await response.json();
 
-      const cacheHits = data.metadata.cacheHits;
-      const cacheMisses = data.metadata.cacheMisses;
-      const totalDomains = data.metadata.totalDomains;
-      const backgroundScraping = data.metadata.backgroundScraping ?? false;
-      const stillPending = data.results.some(
-        (r) =>
-          r.error?.includes('Still scraping') ||
-          r.error?.includes('Scraping in background')
-      );
-      const syncComplete = !backgroundScraping && !stillPending;
-
-      if (syncComplete || cacheHits === totalDomains) {
+      if (data.backgroundScraping) {
+        setProgress(
+          "Scraping in background — results will appear as they complete."
+        );
+        setResults(data.results || []);
+        setLoading(false);
+        pollForResults(domainList);
+      } else {
+        setProgress(null);
+        setResults(data.results || []);
         setLoading(false);
       }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An error occurred");
+      setProgress(null);
+      setLoading(false);
+    }
+  };
 
-      setResults(data.results);
+  const pollForResults = async (domainList: string[]) => {
+    const maxAttempts = 30;
+    let attempts = 0;
 
-      if (syncComplete || cacheHits === totalDomains) {
-        if (cacheHits === totalDomains) {
-          setProgress(`✅ All ${cacheHits} domains served from cache (instant)`);
-        } else {
-          setProgress(`✅ Done! ${totalDomains} domains loaded.`);
-        }
-        setTimeout(() => setProgress(''), 3000);
+    const poll = async () => {
+      if (attempts >= maxAttempts) {
+        setProgress("Background scrape timed out — try bypass cache or retry.");
         return;
       }
 
-      if (cacheMisses > 0) {
-        setProgress(`📦 ${cacheHits} from cache (instant). ⏳ Scraping ${cacheMisses} new domains...`);
-        
-        const MAX_POLL_TIME = 60000; // 1 minute max
-        const POLL_INTERVAL = 2000; // Poll every 2 seconds
-        const startTime = Date.now();
-        let pollCount = 0;
-        
-        // Poll for updates every 2 seconds, max 2 minutes
-        const pollInterval = setInterval(async () => {
-          pollCount++;
-          const elapsed = Date.now() - startTime;
-          
-          // Timeout after 2 minutes
-          if (elapsed >= MAX_POLL_TIME) {
-            clearInterval(pollInterval);
+      attempts++;
+
+      try {
+        const response = await fetch("/api/traffic", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ domains: domainList, dryRun, bypassCache }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setResults(data.results || []);
+
+          const allComplete = data.results?.every(
+            (r: TrafficData) => r.status !== "pending"
+          );
+
+          if (allComplete) {
+            setProgress("All domains processed.");
             setLoading(false);
-            setProgress('Background scraping timed out (2 min). Some domains may still be processing. Refresh to check updates.');
-            setTimeout(() => setProgress(''), 5000);
-            return;
+          } else {
+            setProgress(
+              `Processing… (${attempts}/${maxAttempts})`
+            );
+            setTimeout(poll, 2000);
           }
-          
-          try {
-            const updateResponse = await fetch(`/api/traffic/update?domains=${domainsToCheck.join(',')}`);
-            if (updateResponse.ok) {
-              const updateData = await updateResponse.json();
-              
-              // Merge updated results
-              const updatedMap = new Map<string, TrafficData>(
-                updateData.results.map((r: TrafficData) => [r.domain, r])
-              );
-              const mergedResults = data.results.map((result: TrafficData) => {
-                const updated = updatedMap.get(result.domain);
-                if (updated && updated.error && !updated.error.includes('Still scraping') && !updated.error.includes('Scraping in background')) {
-                  return updated;
-                } else if (updated && !updated.error) {
-                  return updated;
-                }
-                return result;
-              });
-              
-              setResults(mergedResults);
-              
-              // Check if all done (no "Still scraping" or "Scraping in background" errors)
-              const stillScraping = mergedResults.some(r => 
-                r.error?.includes('Still scraping') || 
-                r.error?.includes('Scraping in background')
-              );
-              
-              if (!stillScraping) {
-                clearInterval(pollInterval);
-                setProgress(`✅ Done! ${cacheHits} from cache, ${cacheMisses} freshly scraped.`);
-                setLoading(false);
-                setTimeout(() => setProgress(''), 3000);
-              } else {
-                // Update progress with time remaining
-                const remaining = Math.ceil((MAX_POLL_TIME - elapsed) / 1000);
-                const stillScrapingCount = mergedResults.filter(r => 
-                  r.error?.includes('Still scraping') || r.error?.includes('Scraping in background')
-                ).length;
-                const completed = cacheMisses - stillScrapingCount;
-                setProgress(`📦 ${cacheHits} cached. ⏳ Scraping: ${completed}/${cacheMisses} done (${remaining}s timeout)...`);
-              }
-            }
-          } catch (error) {
-            console.error('Polling error:', error);
-            // Don't stop polling on network errors, but log them
-          }
-        }, POLL_INTERVAL);
-        
-        // Store interval for cleanup
-        pollIntervalRef.current = pollInterval;
-      } else {
-        setProgress(`All ${cacheHits} results from cache!`);
-        setLoading(false);
-        setTimeout(() => setProgress(''), 3000);
+        }
+      } catch {
+        setTimeout(poll, 2000);
       }
-    } catch (error) {
-      console.error('Error:', error);
-      alert(error instanceof Error ? error.message : 'An error occurred');
-      setProgress('Error occurred');
-      setLoading(false);
-      setTimeout(() => setProgress(''), 3000);
-    }
+    };
+
+    setTimeout(poll, 2000);
   };
 
   const handleClear = () => {
-    setInput('');
+    setDomains("");
     setResults([]);
-    setProgress('');
-    // Clear any ongoing polling
-    if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
-      pollIntervalRef.current = null;
-    }
-    setLoading(false);
+    setError(null);
+    setProgress(null);
   };
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-      }
-    };
-  }, []);
+  const handleNormalize = () => {
+    const normalized = domains
+      .split(/[\n,]/)
+      .map((d) => {
+        let domain = d.trim().toLowerCase();
+        domain = domain.replace(/^https?:\/\//, "");
+        domain = domain.replace(/^www\./, "");
+        domain = domain.split("/")[0];
+        return domain;
+      })
+      .filter((d) => d.length > 0)
+      .join("\n");
+
+    setDomains(normalized);
+  };
 
   return (
-    <main className="min-h-screen p-8 max-w-7xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-4xl font-bold mb-3 bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-          TrafficLens
-        </h1>
-        <p className="text-lg text-gray-700 mb-6">
-          Analyze website traffic data for multiple domains. Get insights on monthly visits, growth trends, engagement metrics, and more.
-        </p>
-      </div>
+    <main className="min-h-[100dvh] bg-zinc-50">
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_1px_1px,rgba(0,0,0,0.04)_1px,transparent_0)] [background-size:24px_24px]" />
 
-      <div className="bg-white rounded-lg shadow-md p-6 mb-6">
-        <div className="mb-4">
-          <label htmlFor="domains" className="block text-sm font-medium text-gray-700 mb-2">
-            Paste domains (one per line or comma-separated)
-          </label>
-          <textarea
-            id="domains"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="example.com&#10;google.com&#10;github.com"
-            className="w-full h-32 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
-          />
+      <div className="relative mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-14">
+        <header className="mb-10">
+          <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-sky-700">
+            Bulk traffic intelligence
+          </p>
+          <h1 className="text-4xl font-semibold tracking-tighter text-zinc-900 sm:text-5xl">
+            TrafficLens
+          </h1>
+          <p className="mt-3 max-w-2xl text-base leading-relaxed text-zinc-600">
+            Paste domains, run a bulk lookup, and export monthly visits,
+            growth, and engagement metrics from traffic.cv.
+          </p>
+        </header>
+
+        <div className="tl-surface p-6 sm:p-8">
+          <form onSubmit={handleSubmit} className="space-y-6">
+            <div>
+              <label htmlFor="domains" className="tl-label">
+                Domains
+              </label>
+              <textarea
+                id="domains"
+                value={domains}
+                onChange={(e) => setDomains(e.target.value)}
+                placeholder="example.com&#10;another-site.com&#10;third-domain.org"
+                className="tl-input min-h-[160px] resize-y font-mono"
+                rows={8}
+              />
+              <p className="mt-2 text-xs text-zinc-500">
+                One domain per line, or comma-separated
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+              <button
+                type="button"
+                onClick={handleNormalize}
+                className="tl-btn-secondary w-full sm:w-auto"
+              >
+                Normalize
+              </button>
+              <button
+                type="submit"
+                disabled={loading}
+                className="tl-btn-primary w-full sm:w-auto sm:min-w-[140px]"
+              >
+                {loading ? "Running…" : "Run analysis"}
+              </button>
+              <button
+                type="button"
+                onClick={handleClear}
+                className="tl-btn-danger w-full sm:w-auto"
+              >
+                Clear
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-4 border-t border-zinc-100 pt-5 sm:flex-row sm:gap-8">
+              <label className="flex min-h-11 cursor-pointer items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={dryRun}
+                  onChange={(e) => setDryRun(e.target.checked)}
+                  className="h-5 w-5 rounded border-zinc-300 text-sky-600 focus:ring-sky-500/20"
+                />
+                <span className="text-sm text-zinc-700">
+                  Dry run{" "}
+                  <span className="text-zinc-500">(skip database write)</span>
+                </span>
+              </label>
+              <label className="flex min-h-11 cursor-pointer items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={bypassCache}
+                  onChange={(e) => setBypassCache(e.target.checked)}
+                  className="h-5 w-5 rounded border-zinc-300 text-sky-600 focus:ring-sky-500/20"
+                />
+                <span className="text-sm text-zinc-700">
+                  Bypass cache{" "}
+                  <span className="text-zinc-500">(force fresh scrape)</span>
+                </span>
+              </label>
+            </div>
+          </form>
+
+          {error && (
+            <div
+              className="mt-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+              role="alert"
+            >
+              {error}
+            </div>
+          )}
+
+          {progress && (
+            <div className="mt-6 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+              {progress}
+            </div>
+          )}
         </div>
 
-        <div className="flex flex-wrap gap-2 mb-4">
-          <button
-            type="button"
-            onClick={handleNormalize}
-            disabled={!input.trim()}
-            className="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            Normalize
-          </button>
-          <button
-            type="button"
-            onClick={handleRun}
-            disabled={loading || !input.trim()}
-            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {loading ? 'Running...' : 'Run'}
-          </button>
-          <button
-            type="button"
-            onClick={handleClear}
-            className="px-4 py-2 bg-red-100 text-red-700 rounded-md hover:bg-red-200 transition-colors"
-          >
-            Clear
-          </button>
-          <label className="flex items-center gap-2 px-4 py-2 bg-gray-100 rounded-md cursor-pointer">
-            <input
-              type="checkbox"
-              checked={dryRun}
-              onChange={(e) => setDryRun(e.target.checked)}
-              className="cursor-pointer"
-            />
-            <span className="text-sm">Dry Run (Mock Data)</span>
-          </label>
-          <label className="flex items-center gap-2 px-4 py-2 bg-gray-100 rounded-md cursor-pointer">
-            <input
-              type="checkbox"
-              checked={bypassCache}
-              onChange={(e) => setBypassCache(e.target.checked)}
-              className="cursor-pointer"
-            />
-            <span className="text-sm">Bypass Cache</span>
-          </label>
-        </div>
-
-        {progress && (
-          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
-            <p className="text-sm text-blue-800">{progress}</p>
+        {results.length > 0 && (
+          <div className="mt-8 space-y-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <h2 className="text-xl font-semibold tracking-tight text-zinc-900">
+                Results
+                <span className="ml-2 text-base font-normal text-zinc-500">
+                  ({results.length})
+                </span>
+              </h2>
+              <ExportButtons data={results} />
+            </div>
+            <TrafficTable data={results} />
           </div>
         )}
       </div>
-
-      {results.length > 0 && (
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-semibold">Results ({results.length} domains)</h2>
-            <ExportButtons results={results} />
-          </div>
-          <TrafficTable results={results} />
-        </div>
-      )}
     </main>
   );
 }

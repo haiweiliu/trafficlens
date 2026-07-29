@@ -1,91 +1,76 @@
-'use client';
+"use client";
 
-import { TrafficData } from '@/types';
+import { TrafficData } from "@/lib/types";
 
 interface ExportButtonsProps {
-  results: TrafficData[];
+  data: TrafficData[];
 }
 
-export default function ExportButtons({ results }: ExportButtonsProps) {
-  const convertToTSV = (data: TrafficData[]): string => {
-    const header = 'Domain\tMonthlyVisits\tAvgSessionDuration\tBounceRate\tPagesPerVisit\tCheckedAt';
-    const rows = data.map((r) => {
-      const visits = r.monthlyVisits !== null ? r.monthlyVisits.toString() : '';
-      const duration = r.avgSessionDuration || '';
-      const bounceRate = r.bounceRate !== null ? r.bounceRate.toString() : '';
-      const pagesPerVisit = r.pagesPerVisit !== null ? r.pagesPerVisit.toString() : '';
-      const checkedAt = r.checkedAt || '';
-      return `${r.domain}\t${visits}\t${duration}\t${bounceRate}\t${pagesPerVisit}\t${checkedAt}`;
-    });
-    return [header, ...rows].join('\n');
-  };
+export default function ExportButtons({ data }: ExportButtonsProps) {
+  const exportCSV = () => {
+    const headers = [
+      "Domain",
+      "Monthly Visits",
+      "Growth (%)",
+      "Avg Duration (s)",
+      "Pages/Visit",
+      "Bounce Rate (%)",
+      "Status",
+    ];
 
-  const convertToCSV = (data: TrafficData[]): string => {
-    const header = 'Domain,MonthlyVisits,AvgSessionDuration,BounceRate,PagesPerVisit,CheckedAt';
-    const rows = data.map((r) => {
-      const visits = r.monthlyVisits !== null ? r.monthlyVisits.toString() : '';
-      const duration = r.avgSessionDuration || '';
-      const bounceRate = r.bounceRate !== null ? r.bounceRate.toString() : '';
-      const pagesPerVisit = r.pagesPerVisit !== null ? r.pagesPerVisit.toString() : '';
-      const checkedAt = r.checkedAt || '';
-      // Escape commas and quotes in CSV
-      const escapeCSV = (str: string) => {
-        if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-          return `"${str.replace(/"/g, '""')}"`;
-        }
-        return str;
-      };
-      return [
-        escapeCSV(r.domain),
-        escapeCSV(visits),
-        escapeCSV(duration),
-        escapeCSV(bounceRate),
-        escapeCSV(pagesPerVisit),
-        escapeCSV(checkedAt),
-      ].join(',');
-    });
-    return [header, ...rows].join('\n');
-  };
+    const rows = data.map((row) => [
+      row.domain,
+      row.monthlyVisits ?? "N/A",
+      row.growth ?? "N/A",
+      row.avgDuration ?? "N/A",
+      row.pagesPerVisit ?? "N/A",
+      row.bounceRate ?? "N/A",
+      row.status,
+    ]);
 
-  const handleCopyTSV = async () => {
-    try {
-      const tsv = convertToTSV(results);
-      await navigator.clipboard.writeText(tsv);
-      alert('TSV copied to clipboard! Ready to paste into Google Sheets.');
-    } catch (error) {
-      console.error('Failed to copy:', error);
-      alert('Failed to copy to clipboard. Please try downloading CSV instead.');
-    }
-  };
+    const csvContent = [
+      headers.join(","),
+      ...rows.map((row) =>
+        row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")
+      ),
+    ].join("\n");
 
-  const handleDownloadCSV = () => {
-    const csv = convertToCSV(results);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `traffic-data-${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `trafficlens-export-${new Date().toISOString().split("T")[0]}.csv`;
     link.click();
-    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
+  };
+
+  const exportJSON = () => {
+    const jsonContent = JSON.stringify(data, null, 2);
+    const blob = new Blob([jsonContent], {
+      type: "application/json;charset=utf-8;",
+    });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `trafficlens-export-${new Date().toISOString().split("T")[0]}.json`;
+    link.click();
+    URL.revokeObjectURL(link.href);
   };
 
   return (
-    <div className="flex gap-2">
+    <div className="flex flex-col gap-3 sm:flex-row">
       <button
-        onClick={handleCopyTSV}
-        className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors text-sm"
+        type="button"
+        onClick={exportCSV}
+        className="tl-btn-secondary w-full sm:w-auto"
       >
-        Copy TSV
+        Export CSV
       </button>
       <button
-        onClick={handleDownloadCSV}
-        className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm"
+        type="button"
+        onClick={exportJSON}
+        className="tl-btn-secondary w-full sm:w-auto"
       >
-        Download CSV
+        Export JSON
       </button>
     </div>
   );
 }
-
