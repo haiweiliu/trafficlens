@@ -18,7 +18,8 @@ import {
   isDataFresh,
   getHistoricalData,
   calculateTrends,
-  getCurrentMonth
+  getCurrentMonth,
+  storeTrafficError,
 } from '@/lib/db';
 import { logUsage } from '@/lib/usage-tracker';
 
@@ -146,16 +147,7 @@ async function scrapeInBackground(
         // Critical: Store error state for all domains in this batch so frontend stops polling
         try {
           for (const domain of batch) {
-            storeTrafficData({
-              domain,
-              monthlyVisits: null,
-              avgSessionDuration: null,
-              avgSessionDurationSeconds: null,
-              bounceRate: null,
-              pagesPerVisit: null,
-              checkedAt: new Date().toISOString(),
-              error: `Batch failed: ${errorMsg}`
-            });
+            storeTrafficError(domain, `Batch failed: ${errorMsg}`);
           }
         } catch (dbError) {
           console.error('[Background] Failed to store batch error:', dbError);
@@ -243,7 +235,7 @@ export async function POST(request: NextRequest) {
 
     // DRY RUN: Return mock data immediately
     if (dryRun) {
-      const mockResults: TrafficData[] = domains.map((domain, index) => ({
+      const mockResults: TrafficData[] = domains.map((domain) => ({
         domain,
         monthlyVisits: Math.floor(Math.random() * 1000000),
         avgSessionDuration: '00:02:30',
@@ -251,6 +243,7 @@ export async function POST(request: NextRequest) {
         bounceRate: Math.random() * 100,
         pagesPerVisit: Math.random() * 5 + 1,
         checkedAt: new Date().toISOString(),
+        trafficSources: null,
         error: null,
       }));
 
@@ -281,7 +274,11 @@ export async function POST(request: NextRequest) {
       for (const [domain, data] of dbCached.entries()) {
         // Check if data is fresh (isDataFresh handles www. variations internally)
         // Also accept 0 traffic results (they're valid and don't need re-scraping)
-        if (isDataFresh(data.domain || domain, 30) || data.monthlyVisits === 0) {
+        if (
+          data.monthlyVisits !== null &&
+          data.monthlyVisits !== undefined &&
+          (isDataFresh(data.domain || domain, 30) || data.monthlyVisits === 0)
+        ) {
           cached.set(domain, data);
         }
       }
@@ -342,6 +339,7 @@ export async function POST(request: NextRequest) {
         bounceRate: null,
         pagesPerVisit: null,
         checkedAt: null,
+        trafficSources: null,
         error: 'Scraping in background...',
       });
     }

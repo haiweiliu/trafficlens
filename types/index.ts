@@ -10,6 +10,7 @@ export interface TrafficData {
   bounceRate: number | null;
   pagesPerVisit: number | null;
   checkedAt: string | null;
+  trafficSources?: Record<string, number> | null;
   error: string | null;
 }
 

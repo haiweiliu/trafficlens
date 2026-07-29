@@ -15,6 +15,7 @@
     "lint": "next lint",
     "test": "echo \"Error: no test specified\" && exit 1",
     "qa": "tsx scripts/qa-agent.ts",
+    "qa:auto-fix": "tsx scripts/auto-fix-agent.ts",
     "qa:daily": "bash scripts/run-qa.sh",
     "qa:loop": "tsx scripts/ralph-wiggum-agent.ts",
     "qa:loop:full": "tsx scripts/ralph-wiggum-agent.ts --full",
@@ -22,7 +23,10 @@
     "test:email": "tsx scripts/test-email.ts",
     "data:quality": "tsx scripts/data-quality-agent.ts",
     "pre-deploy": "tsx scripts/pre-deployment-agent.ts",
-    "report:daily": "tsx scripts/daily-report.ts"
+    "report:daily": "tsx scripts/daily-report.ts",
+    "health:probe": "node scripts/trafficlens_health_probe.mjs",
+    "health:heal": "node scripts/trafficlens_self_heal.mjs --heal --diagnose",
+    "health:cron": "bash scripts/install_trafficlens_health_cron.sh"
   },
   "keywords": [],
   "author": "",

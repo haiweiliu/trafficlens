@@ -54,6 +54,7 @@ function initializeSchema(database: Database.Database) {
       pages_per_visit REAL,
       checked_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       source TEXT DEFAULT 'traffic.cv',
+      traffic_sources TEXT, -- JSON string
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(domain, month_year)
@@ -72,7 +73,8 @@ function initializeSchema(database: Database.Database) {
       checked_at TIMESTAMP NOT NULL,
       month_year TEXT NOT NULL,
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      last_error TEXT
+      last_error TEXT,
+      traffic_sources TEXT -- JSON string
     );
 
     CREATE INDEX IF NOT EXISTS idx_latest_checked_at ON traffic_latest(checked_at);
@@ -133,6 +135,19 @@ function initializeSchema(database: Database.Database) {
     if (!hasLastError) {
       database.exec('ALTER TABLE traffic_latest ADD COLUMN last_error TEXT');
     }
+
+    // Migration: Add traffic_sources column if it doesn't exist
+    const hasTrafficSourcesLatest = tableInfo.some(col => col.name === 'traffic_sources');
+    if (!hasTrafficSourcesLatest) {
+      database.exec('ALTER TABLE traffic_latest ADD COLUMN traffic_sources TEXT');
+    }
+
+    const tableInfoSnapshots = database.pragma('table_info(traffic_snapshots)') as any[];
+    const hasTrafficSourcesSnapshots = tableInfoSnapshots.some(col => col.name === 'traffic_sources');
+    if (!hasTrafficSourcesSnapshots) {
+      database.exec('ALTER TABLE traffic_snapshots ADD COLUMN traffic_sources TEXT');
+    }
+
   } catch (e) {
     // Ignore errors if column addition fails
   }
@@ -208,6 +223,7 @@ export function storeTrafficDataForMonth(
       bounce_rate = excluded.bounce_rate,
       pages_per_visit = excluded.pages_per_visit,
       checked_at = excluded.checked_at,
+      traffic_sources = excluded.traffic_sources,
       updated_at = CURRENT_TIMESTAMP
   `);
 
@@ -218,14 +234,55 @@ export function storeTrafficDataForMonth(
     data.avgSessionDurationSeconds,
     data.bounceRate,
     data.pagesPerVisit,
-    data.checkedAt || new Date().toISOString()
+    data.checkedAt || new Date().toISOString(),
+    data.trafficSources ? JSON.stringify(data.trafficSources) : null
   );
 }
 
 /**
  * Store traffic data for current month (backward compatibility)
  */
+export function isTrafficRecordUsable(data: TrafficData | null | undefined): boolean {
+  if (!data) return false;
+  if (data.error && data.error !== 'Scraping in background...') return true;
+  return data.monthlyVisits !== null && data.monthlyVisits !== undefined;
+}
+
+export function purgeIncompleteTrafficCache(): number {
+  const database = getDb();
+  const result = database
+    .prepare(`
+      DELETE FROM traffic_latest
+      WHERE monthly_visits IS NULL
+        AND (last_error IS NULL OR last_error = 'Scraping in background...')
+    `)
+    .run();
+  return result.changes;
+}
+
+export function storeTrafficError(domain: string, error: string): void {
+  const database = getDb();
+  const monthYear = getCurrentMonth();
+  const stmt = database.prepare(`
+    INSERT INTO traffic_latest (
+      domain, monthly_visits, avg_session_duration_seconds,
+      bounce_rate, pages_per_visit, checked_at, month_year, last_error, traffic_sources
+    ) VALUES (?, NULL, NULL, NULL, NULL, ?, ?, ?, NULL)
+    ON CONFLICT(domain) DO UPDATE SET
+      last_error = excluded.last_error,
+      checked_at = excluded.checked_at,
+      updated_at = CURRENT_TIMESTAMP
+  `);
+
+  stmt.run(domain, new Date().toISOString(), monthYear, error);
+}
+
 export function storeTrafficData(data: TrafficData): void {
+  if (!isTrafficRecordUsable(data)) {
+    console.warn(`[DB] Skipping incomplete cache write for ${data.domain} (monthlyVisits=null)`);
+    return;
+  }
+
   const monthYear = getCurrentMonth();
   storeTrafficDataForMonth(data, monthYear);
 
@@ -234,8 +291,8 @@ export function storeTrafficData(data: TrafficData): void {
   const latestStmt = database.prepare(`
     INSERT INTO traffic_latest (
       domain, monthly_visits, avg_session_duration_seconds,
-      bounce_rate, pages_per_visit, checked_at, month_year, last_error
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      bounce_rate, pages_per_visit, checked_at, month_year, last_error, traffic_sources
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(domain) DO UPDATE SET
       monthly_visits = excluded.monthly_visits,
       avg_session_duration_seconds = excluded.avg_session_duration_seconds,
@@ -244,6 +301,7 @@ export function storeTrafficData(data: TrafficData): void {
       checked_at = excluded.checked_at,
       month_year = excluded.month_year,
       last_error = excluded.last_error,
+      traffic_sources = excluded.traffic_sources,
       updated_at = CURRENT_TIMESTAMP
   `);
 
@@ -255,7 +313,8 @@ export function storeTrafficData(data: TrafficData): void {
     data.pagesPerVisit,
     data.checkedAt || new Date().toISOString(),
     monthYear,
-    data.error || null
+    data.error || null,
+    data.trafficSources ? JSON.stringify(data.trafficSources) : null
   );
 }
 
@@ -323,6 +382,7 @@ export function getLatestTrafficData(domain: string): TrafficData | null {
     bounceRate: row.bounce_rate,
     pagesPerVisit: row.pages_per_visit,
     checkedAt: row.checked_at,
+    trafficSources: row.traffic_sources ? JSON.parse(row.traffic_sources) : null,
     error: null,
   };
 }
@@ -386,6 +446,7 @@ export function getLatestTrafficDataBatch(domains: string[]): Map<string, Traffi
           bounceRate: row.bounce_rate,
           pagesPerVisit: row.pages_per_visit,
           checkedAt: row.checked_at,
+          trafficSources: row.traffic_sources ? JSON.parse(row.traffic_sources) : null,
           error: row.last_error || null,
         });
       }
@@ -423,6 +484,11 @@ export function isDataFresh(domain: string, maxAgeDays: number = 30): boolean {
 
   const row = stmt.get(withoutWww, withWww) as any;
   if (!row) return false;
+
+  // Partial scrapes (duration only, visits null) must never count as fresh cache.
+  if (row.monthly_visits === null || row.monthly_visits === undefined) {
+    return false;
+  }
 
   const now = new Date();
   const currentMonth = getCurrentMonth();

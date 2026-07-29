@@ -7,6 +7,7 @@ import { Browser, Page } from 'playwright';
 import { parseNumberWithSuffix, parseDurationToSeconds, parsePercentage } from './parsing-utils';
 import { TrafficData } from '@/types';
 import { extractHistoricalMonths, HistoricalMonthData } from './historical-extractor';
+import { fetchTrafficCvBatch, isCompleteTrafficResult } from './trafficcv-fetch';
 
 /**
  * Get the appropriate Chromium browser launcher based on environment
@@ -110,6 +111,42 @@ async function getChromiumBrowser() {
   }
 }
 
+
+/**
+ * Reorder results to match the original request order
+ * This is necessary because traffic.cv may return domains in a different order
+ */
+function reorderResults(results: TrafficData[], originalDomains: string[]): TrafficData[] {
+  const resultMap = new Map<string, TrafficData>();
+
+  // Build a map of normalized domain -> result
+  for (const result of results) {
+    const normalized = result.domain.toLowerCase().replace(/^www\./, '');
+    resultMap.set(normalized, result);
+  }
+
+  // Return results in the original request order
+  return originalDomains.map(domain => {
+    const normalized = domain.toLowerCase().replace(/^www\./, '');
+    const result = resultMap.get(normalized);
+    if (result) {
+      return result;
+    }
+    // If not found, return an error result
+    return {
+      domain,
+      monthlyVisits: null,
+      avgSessionDuration: null,
+      avgSessionDurationSeconds: null,
+      bounceRate: null,
+      pagesPerVisit: null,
+      checkedAt: null,
+      trafficSources: null,
+      error: 'Domain result not found',
+    };
+  });
+}
+
 /**
  * Scrapes traffic data from Traffic.cv bulk endpoint
  * @param domains Array of domains (max 10 per call)
@@ -129,6 +166,26 @@ export async function scrapeTrafficData(
 
   if (domains.length > 10) {
     throw new Error('Maximum 10 domains per batch');
+  }
+
+  // Tier 1: CF-worker flight-chunk fetch (fast, bypasses Cloudflare + DOM drift)
+  try {
+    const flightResults = await fetchTrafficCvBatch(domains);
+    const completeCount = flightResults.filter(isCompleteTrafficResult).length;
+    const successRate = completeCount / domains.length;
+
+    if (successRate >= 0.5) {
+      console.log(
+        `[FlightFetch] ${completeCount}/${domains.length} domains resolved via traffic.cv proxy`
+      );
+      return reorderResults(flightResults, domains);
+    }
+
+    console.warn(
+      `[FlightFetch] Low success rate (${Math.round(successRate * 100)}%) — falling back to Playwright`
+    );
+  } catch (error) {
+    console.warn('[FlightFetch] Failed, falling back to Playwright:', error);
   }
 
   // Normalize domains for traffic.cv query (remove www. and ensure clean format)
@@ -172,11 +229,11 @@ export async function scrapeTrafficData(
     });
 
     // Optimize: Reduced timeouts for faster processing
-    page.setDefaultTimeout(20000); // Reduced from 60s to 20s
+    page.setDefaultTimeout(45000); // Increased to 45s for proxy reliability
 
     // Navigate to the bulk checker page
     console.log(`Navigating to: ${url}`);
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 }); // Increased to 30s
 
     // Quick check for "No valid data" - ONLY for single domain queries
     // For bulk queries, let the normal extraction process handle individual domains
@@ -206,6 +263,7 @@ export async function scrapeTrafficData(
           bounceRate: null,
           pagesPerVisit: null,
           checkedAt: new Date().toISOString(),
+          trafficSources: null,
           error: null, // Not an error - just no data available
         }));
       }
@@ -226,7 +284,7 @@ export async function scrapeTrafficData(
     // Wait for results to appear - try selectors with shorter timeout
     for (const selector of possibleSelectors) {
       try {
-        await page.waitForSelector(selector, { timeout: 2000 }); // Reduced from 3s to 2s
+        await page.waitForSelector(selector, { timeout: 5000 }); // Increased to 5s
         resultsFound = true;
         break;
       } catch (e) {
@@ -251,7 +309,7 @@ export async function scrapeTrafficData(
       // Additional check: Verify cards/table have actual content with metrics
       // Wait for expected domains to appear (more strict for Railway)
       try {
-        const verificationTimeout = isRailway ? 15000 : 5000; // Railway: 15s, localhost: 5s
+        const verificationTimeout = isRailway ? 45000 : 10000; // Railway: 45s, localhost: 10s
         const expectedCount = domains.length;
         const isRailwayEnv = isRailway;
 
@@ -348,6 +406,7 @@ export async function scrapeTrafficData(
             bounceRate: null,
             pagesPerVisit: null,
             checkedAt: null,
+            trafficSources: null,
             error: null, // No error - site has 0 traffic
           });
         } else {
@@ -360,12 +419,13 @@ export async function scrapeTrafficData(
             bounceRate: null,
             pagesPerVisit: null,
             checkedAt: null,
+            trafficSources: null,
             error: 'Domain not found in results',
           });
         }
       }
 
-      return tableResults;
+      return reorderResults(tableResults, domains);
     }
 
     // Fallback to card format
@@ -429,6 +489,7 @@ export async function scrapeTrafficData(
               bounceRate: null,
               pagesPerVisit: null,
               checkedAt: null,
+              trafficSources: null,
               error: null, // No error - site has 0 traffic
             });
           }
@@ -442,18 +503,19 @@ export async function scrapeTrafficData(
             bounceRate: null,
             pagesPerVisit: null,
             checkedAt: null,
+            trafficSources: null,
             error: 'No data found on page (selectors may need update)',
           });
         }
       }
 
-      return cardResults;
+      return reorderResults(cardResults, domains);
     }
 
     // Try a more generic extraction approach
     const genericResults = await extractGeneric(page, domains);
     if (genericResults.length > 0) {
-      return genericResults;
+      return reorderResults(genericResults, domains);
     }
 
     // If no results found, return error with more context
@@ -469,6 +531,7 @@ export async function scrapeTrafficData(
       bounceRate: null,
       pagesPerVisit: null,
       checkedAt: null,
+      trafficSources: null,
       error: errorMsg,
     }));
 
@@ -482,6 +545,7 @@ export async function scrapeTrafficData(
       bounceRate: null,
       pagesPerVisit: null,
       checkedAt: null,
+      trafficSources: null,
       error: error instanceof Error ? error.message : 'Unknown error',
     }));
   } finally {
@@ -687,6 +751,7 @@ async function extractFromTable(page: Page, domains: string[]): Promise<TrafficD
           bounceRate,
           pagesPerVisit,
           checkedAt: null,
+          trafficSources: null,
           error: null,
         });
       } catch (e) {
@@ -1088,6 +1153,7 @@ async function extractGeneric(page: Page, domains: string[]): Promise<TrafficDat
           pagesPerVisit: null,
           // Will be calculated from historical data
           checkedAt: null,
+          trafficSources: null,
           error: null,
         });
       }
@@ -1112,6 +1178,24 @@ function generateMockData(domains: string[]): TrafficData[] {
 
     return {
       domain,
+      monthlyVisits: visits,
+      avgSessionDuration: `00:${String(durationMinutes).padStart(2, '0')}:${String(durationSeconds).padStart(2, '0')}`,
+      avgSessionDurationSeconds: durationMinutes * 60 + durationSeconds,
+      bounceRate: 30 + Math.random() * 40,
+      pagesPerVisit: 1 + Math.random() * 5,
+      checkedAt: new Date().toISOString(),
+      trafficSources: {
+        'Direct': 40 + Math.random() * 20,
+        'Search': 20 + Math.random() * 20,
+        'Social': 10 + Math.random() * 10,
+        'Referrals': 5 + Math.random() * 5,
+        'Mail': 1 + Math.random() * 2
+      },
+      error: null,
+    };
+
+    return {
+      domain,
       monthlyVisits: Math.round(visits),
       avgSessionDuration: `${durationMinutes}m ${durationSeconds}s`,
       avgSessionDurationSeconds: durationMinutes * 60 + durationSeconds,
@@ -1123,3 +1207,134 @@ function generateMockData(domains: string[]): TrafficData[] {
   });
 }
 
+/*
+ * Scrapes detailed traffic data for a single domain from its dedicated page
+ * URL: https://traffic.cv/{domain}
+ */
+export async function scrapeDetail(
+  domain: string
+): Promise<TrafficData | null> {
+  let browser: Browser | null = null;
+  const url = `https://traffic.cv/${domain}`;
+
+  try {
+    browser = await getChromiumBrowser();
+    const context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    });
+    const page = await context.newPage();
+
+    // Optimize: Block irrelevant resources
+    await page.route('**/*', (route) => {
+      const type = route.request().resourceType();
+      if (['image', 'font', 'media', 'websocket'].includes(type)) {
+        route.abort();
+      } else {
+        route.continue();
+      }
+    });
+
+    console.log(`[Detailed Scraper] Navigating to: ${url}`);
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+    // Wait for the main content to load
+    // The traffic sources chart is usually further down, but basic stats are at top
+    // We look for the "Traffic Sources" header to ensure that section is loaded if possible
+    try {
+      await page.waitForSelector('.recharts-legend-wrapper', { timeout: 10000 });
+    } catch (e) {
+      console.log('[Detailed Scraper] Traffic sources chart not found, proceeding with what we have');
+    }
+
+    // 1. Extract Basic Metrics (Total Visits, Avg Duration, etc.)
+    // These are often in cards or a summary section at the top
+    // We can reuse some logic or valid selectors from the detail page structure
+    // Logic: Look for specific labels and their associated values
+    const metrics = await page.evaluate(() => {
+      const getTextByLabel = (label: string) => {
+        const elements = Array.from(document.querySelectorAll('div, span, p'));
+        // Find element that contains the label
+        const el = elements.find(e => e.textContent?.toLowerCase().includes(label.toLowerCase()));
+        if (!el) return null;
+        // The value is usually in a sibling or child, or the next element
+        // Simple heuristic: look for a number in the closest relevant container
+        // Or specific selectors if known.
+        // For now, let's try a robust approach: find the card containing the label
+        const listItems = Array.from(document.querySelectorAll('li, .card, .flex-col'));
+        const container = listItems.find(item => item.textContent?.toLowerCase().includes(label.toLowerCase()));
+        return container?.textContent || null;
+      };
+
+      return {
+        visits: getTextByLabel('Total Visits'),
+        duration: getTextByLabel('Avg. Visit Duration') || getTextByLabel('Avg Duration'),
+        bounce: getTextByLabel('Bounce Rate'),
+        pages: getTextByLabel('Pages per Visit'),
+      };
+    });
+
+    // Helper to extract clean values from text
+    const extractValue = (text: string | null, regex: RegExp) => {
+      if (!text) return null;
+      const match = text.match(regex);
+      return match ? match[0] : null;
+    };
+
+    const monthlyVisitsRaw = extractValue(metrics.visits, /[\d.]+[KMBkmb]?/);
+    const avgDurationRaw = extractValue(metrics.duration, /\d{2}:\d{2}:\d{2}/);
+    const bounceRateRaw = extractValue(metrics.bounce, /[\d.]+/);
+    const pagesPerVisitRaw = extractValue(metrics.pages, /[\d.]+/);
+
+    // 2. Extract Traffic Sources
+    // Selectors identified: .recharts-legend-wrapper ul li
+    const trafficSources: Record<string, number> = {};
+    const legendItems = await page.$$('.recharts-legend-wrapper ul li');
+
+    for (const item of legendItems) {
+      const text = await item.textContent();
+      if (text && text.includes(':')) {
+        const [source, percentStr] = text.split(':').map(s => s.trim());
+        const percent = parseFloat(percentStr.replace('%', ''));
+        if (source && !isNaN(percent)) {
+          // Flatten source names (e.g. "Organic Search" -> "search", or keep as is)
+          // Keeping as is for flexible display, or normalize if needed.
+          // Let's normalize keys to lowercase for consistency
+          const key = source.toLowerCase().replace(/\s+/g, '_');
+          trafficSources[key] = percent;
+        }
+      }
+    }
+
+    await browser.close();
+
+    // Construct TrafficData object
+    const trafficData: TrafficData = {
+      domain,
+      monthlyVisits: monthlyVisitsRaw ? parseNumberWithSuffix(monthlyVisitsRaw) : null,
+      avgSessionDuration: avgDurationRaw,
+      avgSessionDurationSeconds: avgDurationRaw ? parseDurationToSeconds(avgDurationRaw) : null,
+      bounceRate: bounceRateRaw ? parseFloat(bounceRateRaw) : null,
+      pagesPerVisit: pagesPerVisitRaw ? parseFloat(pagesPerVisitRaw) : null,
+      checkedAt: new Date().toISOString(),
+      trafficSources: Object.keys(trafficSources).length > 0 ? trafficSources : null,
+      error: null
+    };
+
+    return trafficData;
+
+  } catch (error) {
+    console.error('[Detailed Scraper] Error:', error);
+    if (browser) await browser.close();
+    return {
+      domain,
+      monthlyVisits: null,
+      avgSessionDuration: null,
+      avgSessionDurationSeconds: null,
+      bounceRate: null,
+      pagesPerVisit: null,
+      checkedAt: new Date().toISOString(),
+      trafficSources: null,
+      error: error instanceof Error ? error.message : 'Scraping failed'
+    };
+  }
+}

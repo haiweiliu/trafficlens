@@ -2,7 +2,7 @@ name: Daily QA Tests
 
 on:
   schedule:
-    - cron: '0 2 * * *'  # 2 AM UTC daily
+    - cron: '0 2,14 * * *'  # Every 12 hours (2 AM and 2 PM UTC)
   workflow_dispatch:  # Manual trigger
     inputs:
       run_mode:
@@ -53,6 +53,17 @@ jobs:
       - name: Run Quick Test
         if: ${{ github.event.inputs.run_mode == 'quick-test' }}
         run: npm run qa:loop:quick
+        continue-on-error: true
+      
+      - name: Run Auto-Fix Agent (Self-Healing)
+        if: failure()
+        run: npm run qa:auto-fix
+        continue-on-error: true
+
+      - name: TrafficLens health probe (canary visits)
+        run: npm run health:probe
+        env:
+          TL_PROBE_WAIT_MS: 120000
         continue-on-error: true
       
       - name: Upload QA reports
