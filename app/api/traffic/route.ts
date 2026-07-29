@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { normalizeDomains, chunkArray } from '@/lib/domain-utils';
 import { scrapeTrafficData } from '@/lib/scraper';
+import { fetchTrafficCvBatch, isCompleteTrafficResult } from '@/lib/trafficcv-fetch';
 import { retryScrapeTrafficData, backgroundRetryFailedDomains } from '@/lib/retry-scraper';
 import { TrafficData } from '@/types';
 import { trafficCache } from '@/lib/cache';
@@ -72,8 +73,11 @@ const INTER_BATCH_SLEEP_MS = Math.max(
  */
 const PARALLEL_BATCHES = 3;
 
-/** Serialize background scrapes: concurrent POSTs no longer stack multiple Chromium pipelines (Browser Bomb). */
-let backgroundChain: Promise<void> = Promise.resolve();
+/** Flight-chunk fetch is fast enough to block for typical UI batches (≤10 domains). */
+const SYNC_SCRAPE_LIMIT = Math.min(
+  10,
+  Math.max(1, parseInt(process.env.TL_SYNC_SCRAPE_LIMIT || '10', 10))
+);
 
 function enqueueBackgroundScrape(task: () => Promise<void>): void {
   // Parallel execution pool (Bypassed serialization for Extreme Acceleration)
@@ -330,6 +334,40 @@ export async function POST(request: NextRequest) {
     const cacheHits = cached.size;
     const cacheMisses = domains.filter(d => !cached.has(d));
 
+    let freshResults: TrafficData[] = [];
+    let backgroundScraping = false;
+
+    // Sync path: flight-chunk fetch returns in seconds — no placeholder polling loop
+    if (cacheMisses.length > 0 && cacheMisses.length <= SYNC_SCRAPE_LIMIT) {
+      console.log(`[API] Sync scrape for ${cacheMisses.length} cache miss(es)`);
+      const batches = chunkArray(cacheMisses, 10);
+      for (const batch of batches) {
+        let batchResults = await fetchTrafficCvBatch(batch);
+        const completeRate =
+          batchResults.filter(isCompleteTrafficResult).length / batch.length;
+        if (completeRate < 0.5) {
+          batchResults = await scrapeTrafficData(batch, false);
+        }
+        for (const result of batchResults) {
+          if (result.domain) {
+            if (isCompleteTrafficResult(result)) {
+              storeTrafficData(result);
+              if (
+                !result.error &&
+                'historicalMonths' in result &&
+                Array.isArray(result.historicalMonths)
+              ) {
+                storeHistoricalTrafficData(result.domain, result.historicalMonths, result);
+              }
+            } else if (result.error) {
+              storeTrafficError(result.domain, result.error);
+            }
+          }
+          freshResults.push(result);
+        }
+      }
+    }
+
     // Prepare cached results for immediate return
     const cachedResults: TrafficData[] = [];
     for (const [domain, data] of cached.entries()) {
@@ -351,27 +389,32 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // For cache misses, return placeholders IMMEDIATELY and scrape in background
-    // This ensures instant response for cached data - NO BLOCKING on scraping
+    // Placeholders only when we defer to background (large batches)
     const placeholderResults: TrafficData[] = [];
-
-    // Create placeholders for ALL cache misses - no blocking scrape
-    for (const domain of cacheMisses) {
-      placeholderResults.push({
-        domain,
-        monthlyVisits: null,
-        avgSessionDuration: null,
-        avgSessionDurationSeconds: null,
-        bounceRate: null,
-        pagesPerVisit: null,
-        checkedAt: null,
-        trafficSources: null,
-        error: 'Scraping in background...',
-      });
+    if (cacheMisses.length > freshResults.length) {
+      const freshDomains = new Set(
+        freshResults.map((r) => r.domain.toLowerCase().replace(/^www\./, ''))
+      );
+      for (const domain of cacheMisses) {
+        const norm = domain.toLowerCase().replace(/^www\./, '');
+        if (freshDomains.has(norm)) continue;
+        placeholderResults.push({
+          domain,
+          monthlyVisits: null,
+          avgSessionDuration: null,
+          avgSessionDurationSeconds: null,
+          bounceRate: null,
+          pagesPerVisit: null,
+          checkedAt: null,
+          trafficSources: null,
+          error: 'Scraping in background...',
+        });
+      }
+      backgroundScraping = placeholderResults.length > 0;
     }
 
-    // Combine cached + placeholders
-    const immediateResults = [...cachedResults, ...placeholderResults];
+    // Combine cached + sync-scraped + placeholders
+    const immediateResults = [...cachedResults, ...freshResults, ...placeholderResults];
 
     // Sort results to match original domain order (preserves Google Sheet/CSV order)
     immediateResults.sort((a, b) => {
@@ -388,14 +431,18 @@ export async function POST(request: NextRequest) {
 
     // Start background scraping for ALL cache misses (non-blocking)
     // This is fire-and-forget - response returns immediately
-    if (cacheMisses.length > 0) {
-      console.log(`[API] Returning ${cacheHits} cached results immediately, ${cacheMisses.length} domains will scrape in background`);
-      // Don't await - let it run in background
-      enqueueBackgroundScrape(() =>
-        scrapeInBackground(cacheMisses, domainOrderMap, originalDomainMap)
+    if (backgroundScraping) {
+      const deferred = cacheMisses.filter((domain) =>
+        placeholderResults.some((p) => p.domain === domain)
       );
-    } else {
+      console.log(
+        `[API] ${cacheHits} cached, ${freshResults.length} sync-scraped, ${deferred.length} deferred to background`
+      );
+      enqueueBackgroundScrape(() => scrapeInBackground(deferred, domainOrderMap, originalDomainMap));
+    } else if (cacheMisses.length === 0) {
       console.log(`[API] All ${cacheHits} domains served from cache - instant response`);
+    } else {
+      console.log(`[API] Sync scrape completed for ${freshResults.length} domain(s)`);
     }
 
     // Log usage statistics (only for cached results for now)
@@ -425,7 +472,7 @@ export async function POST(request: NextRequest) {
         cacheHits,
         cacheMisses: cacheMisses.length,
         errors: [],
-        backgroundScraping: cacheMisses.length > 0,
+        backgroundScraping,
       },
     };
 
