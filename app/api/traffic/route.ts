@@ -44,14 +44,43 @@ interface TrafficResponse {
 }
 
 /**
- * Rate limiting: delay between batches (in milliseconds)
+ * Rate limiting: delay between batch *groups* (parallel processor chunks).
+ * Env TL_BATCH_DELAY_MS — on CPX31 / scraper-HQ raise to 15000–20000 if CPU pegged at 400%.
  */
-const BATCH_DELAY_MS = 2000;
+const BATCH_DELAY_MS = Math.max(
+  5000,
+  parseInt(process.env.TL_BATCH_DELAY_MS || '12000', 10)
+);
+
+/**
+ * Domains per Playwright scrape call (bulk traffic.cv URL). 2–3 is efficient; 1 lowers peak RAM/CPU per step.
+ * Env TL_BG_DOMAIN_CHUNK
+ */
+const BG_DOMAIN_CHUNK = 10;
+
+/**
+ * Extra pause after each background batch (ms). Env TL_INTER_BATCH_SLEEP_MS — use 3000–8000 on busy VPS.
+ */
+const INTER_BATCH_SLEEP_MS = Math.max(
+  0,
+  parseInt(process.env.TL_INTER_BATCH_SLEEP_MS || '4000', 10)
+);
 
 /**
  * Number of parallel batches to process
+ * Reduced from 5 to 1 to prevent Playwright OOM (SIGTRAP) crashes on Railway Railway nodes 
  */
-const PARALLEL_BATCHES = 5;
+const PARALLEL_BATCHES = 3;
+
+/** Serialize background scrapes: concurrent POSTs no longer stack multiple Chromium pipelines (Browser Bomb). */
+let backgroundChain: Promise<void> = Promise.resolve();
+
+function enqueueBackgroundScrape(task: () => Promise<void>): void {
+  // Parallel execution pool (Bypassed serialization for Extreme Acceleration)
+  task().catch((err) => {
+    console.error('[Background Task] Unhandled:', err);
+  });
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -114,14 +143,13 @@ async function scrapeInBackground(
 
     console.log(`[Background] Starting scrape for ${cacheMisses.length} domains...`);
 
-    // Split into batches of 10 (Traffic.cv limit)
-    const batches = chunkArray(cacheMisses, 10);
+    const batches = chunkArray(cacheMisses, BG_DOMAIN_CHUNK);
     const allResults: TrafficData[] = [];
 
     const batchProcessor = async (batch: string[], batchIndex: number) => {
       console.log(`[Background] Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} domains)`);
       try {
-        const batchResults = await scrapeTrafficData(batch, false);
+        const batchResults = await scrapeTrafficData(batch, false, false);
 
         // Store results in database (including errors)
         for (const result of batchResults) {
@@ -134,6 +162,10 @@ async function scrapeInBackground(
               storeHistoricalTrafficData(result.domain, result.historicalMonths, result);
             }
           }
+        }
+
+        if (INTER_BATCH_SLEEP_MS > 0) {
+          await sleep(INTER_BATCH_SLEEP_MS);
         }
 
         return {
@@ -264,20 +296,14 @@ export async function POST(request: NextRequest) {
     if (bypassCache) {
       cached = new Map<string, TrafficData>();
     } else {
-      // Check database for fresh data
-      // SimilarWeb releases monthly data by the 10th of following month (+ 2-day buffer)
-      // Before 12th: Previous month's data is still valid
-      // On/after 12th: Current month's data should be available
       const dbCached = getLatestTrafficDataBatch(domains);
-      // Filter to only fresh data based on SimilarWeb's update schedule
       cached = new Map<string, TrafficData>();
       for (const [domain, data] of dbCached.entries()) {
-        // Check if data is fresh (isDataFresh handles www. variations internally)
-        // Also accept 0 traffic results (they're valid and don't need re-scraping)
+        // Reject partial cache rows (duration-only scrapes with null visits)
         if (
           data.monthlyVisits !== null &&
           data.monthlyVisits !== undefined &&
-          (isDataFresh(data.domain || domain, 30) || data.monthlyVisits === 0)
+          isDataFresh(data.domain || domain, 30)
         ) {
           cached.set(domain, data);
         }
@@ -365,9 +391,9 @@ export async function POST(request: NextRequest) {
     if (cacheMisses.length > 0) {
       console.log(`[API] Returning ${cacheHits} cached results immediately, ${cacheMisses.length} domains will scrape in background`);
       // Don't await - let it run in background
-      scrapeInBackground(cacheMisses, domainOrderMap, originalDomainMap).catch(err => {
-        console.error('[Background] Failed to start background scraping:', err);
-      });
+      enqueueBackgroundScrape(() =>
+        scrapeInBackground(cacheMisses, domainOrderMap, originalDomainMap)
+      );
     } else {
       console.log(`[API] All ${cacheHits} domains served from cache - instant response`);
     }

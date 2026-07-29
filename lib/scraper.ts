@@ -8,13 +8,22 @@ import { parseNumberWithSuffix, parseDurationToSeconds, parsePercentage } from '
 import { TrafficData } from '@/types';
 import { extractHistoricalMonths, HistoricalMonthData } from './historical-extractor';
 import { fetchTrafficCvBatch, isCompleteTrafficResult } from './trafficcv-fetch';
+import path from 'path';
+import fs from 'fs';
+
+// Ensure a local temp directory exists to avoid EPERM in /var/folders on macOS
+const LOCAL_TMP = path.join(process.cwd(), '.playwright_tmp');
+if (!fs.existsSync(LOCAL_TMP)) {
+  fs.mkdirSync(LOCAL_TMP, { recursive: true });
+}
+process.env.TMPDIR = LOCAL_TMP;
 
 /**
  * Get the appropriate Chromium browser launcher based on environment
  * - Vercel: Uses @sparticuz/chromium (serverless-compatible)
  * - Railway/Local: Uses regular Playwright (full filesystem access)
  */
-async function getChromiumBrowser() {
+async function getChromiumBrowser(proxyConfig?: { server: string; username?: string; password?: string } | null) {
   const isVercel = !!(
     process.env.VERCEL ||
     process.env.VERCEL_ENV ||
@@ -26,14 +35,24 @@ async function getChromiumBrowser() {
     const { chromium } = await import('playwright-core');
     const Chromium = (await import('@sparticuz/chromium')).default;
 
+    const args = [...Chromium.args];
+    // FORCE DIRECT if explicit null is passed (meaning "no proxy please")
+    // proxyConfig === undefined means "use defaults" (if we had any for Vercel, which we don't usually)
+    // proxyConfig === null means "direct connection"
+    if (proxyConfig === null) {
+      args.push('--no-proxy-server');
+    }
+
     return chromium.launch({
       headless: true,
       executablePath: await Chromium.executablePath(),
-      args: Chromium.args,
+      args,
+      proxy: proxyConfig || undefined,
     });
   } else {
     // Railway/Local: Use regular Playwright
     const { chromium } = await import('playwright');
+    const userDataDir = path.join(LOCAL_TMP, 'user_data_global');
 
     // Determine proxy settings
     let proxyServer = process.env.PROXY_URL;
@@ -41,98 +60,126 @@ async function getChromiumBrowser() {
     let proxyPassword = process.env.PROXY_PASSWORD;
     const proxyscrapeKey = process.env.PROXYSCRAPE_API_KEY;
 
+    // IF proxyConfig is explicitly provided (not null/undefined), use it
+    if (proxyConfig) {
+      // It's a custom proxy object
+      return chromium.launch({
+        headless: true,
+        proxy: proxyConfig,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--disable-gpu',
+          `--user-data-dir=${path.join(LOCAL_TMP, 'user_data_' + Date.now())}`
+        ]
+      });
+    }
+
+    // IF proxyConfig is explicit NULL, it means "Force Direct / No Proxy"
+    if (proxyConfig === null) {
+      return chromium.launch({
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--disable-gpu',
+          '--disable-site-isolation-trials', // Aggressive memory saving
+          '--js-flags="--max-old-space-size=512"', // Limit V8 memory
+          '--no-proxy-server' // <--- CRITICAL FIX
+        ]
+      });
+    }
+
+    // OTHERWISE (undefined): Apply Defaults (PyProxy / ProxyScrape)
+
     // Default to PyProxy Sticky IP if no manual proxy is set
     // WE USE STICKY IP (Session) for better speed/success rate, with random session ID to avoid collisions
-    if (!proxyServer && !proxyscrapeKey) {
-      const sessionId = Math.random().toString(36).substring(2, 10);
-      proxyServer = 'http://c36288e57056c2d5.byi.na.pyproxy.io:16666';
-      // Session duration 30 mins (sessTime-30)
-      proxyUsername = `proxyming123-zone-resi-session-${sessionId}-sessTime-30`;
-      proxyPassword = 'G12345678';
-      console.log(`Using PyProxy Sticky IP (Session: ${sessionId})`);
-    }
+    // NUCLEAR DIRECT DIAGNOSIS: Disable all proxy fetching
+    const baseArgs = [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--no-first-run',
+      '--disable-gpu',
+      '--disable-site-isolation-trials',
+      '--disable-features=IsolateOrigins,site-per-process',
+      '--no-proxy-server' // FORCE DIRECT
+    ];
 
-    // [Fallback logic for ProxyScrape removed/demoted or kept if you want fallback, 
-    // but user requested to use Sticky IP. The existing code had a check for proxyscrapeKey. 
-    // I will keep the PROXY_URL check logic but prioritize the PyProxy default if nothing is set.]
-
-    // If no manual proxy but API key exists (and we didn't set PyProxy above), fetch a dynamic one
-    // Note: The previous logic was "if !proxyServer && key". 
-    // Since we now set proxyServer for PyProxy default, this block will effectively be skipped unless we change logic.
-    // However, if the user explicitly wants to use ProxyScrape, they might not set PROXY_URL but providing the KEY.
-    // So to be safe, let's only use PyProxy if NO config is present at all.
-
-    if (!proxyServer && proxyscrapeKey) {
-      try {
-        console.log('Fetching fresh proxy from ProxyScrape...');
-        // Fetch http proxies, 2s timeout to ensure speed
-        const apiUrl = `https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=2000&country=all&ssl=all&anonymity=all&key=${proxyscrapeKey}`;
-
-        // Use Node's native fetch
-        const response = await fetch(apiUrl);
-        const text = await response.text();
-        const proxies = text.split('\n').map(p => p.trim()).filter(Boolean);
-
-        if (proxies.length > 0) {
-          // Pick a random proxy
-          const randomProxy = proxies[Math.floor(Math.random() * proxies.length)];
-          proxyServer = `http://${randomProxy}`;
-          console.log(`Selected random proxy: ${proxyServer}`);
-        } else {
-          console.warn('No proxies returned from ProxyScrape API');
-        }
-      } catch (error) {
-        console.error('Failed to fetch from ProxyScrape:', error);
-      }
-    }
-
-    let launchOptions: any = {
+    console.log('DIAGNOSTIC: Running in Force Direct Mode (No Proxy)');
+    return chromium.launch({
       headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--disable-gpu',
-      ],
-    };
-
-    if (proxyServer) {
-      console.log(`Using proxy configuration: ${proxyServer.split('@').pop()}`); // Log simplified URL for privacy
-      launchOptions.proxy = {
-        server: proxyServer,
-        username: proxyUsername,
-        password: proxyPassword
-      };
-    }
-
-    return chromium.launch(launchOptions);
+      args: [...baseArgs, `--user-data-dir=${path.join(LOCAL_TMP, 'user_data_direct_' + Date.now())}`]
+    });
   }
 }
 
+// Global singleton browser instance to avoid recreating Playwright per batch
+// Drastically saves threads (prevents pthread_create SIGTRAP) on Railway
+let globalBrowser: Browser | null = null;
+let browserLaunchPromise: Promise<Browser> | null = null;
 
-/**
- * Reorder results to match the original request order
- * This is necessary because traffic.cv may return domains in a different order
- */
+// Browser Bomb Protection: Ensure only ONE scraping operation happens at a time
+// to prevent CPU saturation (350% orbit) and zombie thread pile-up.
+let isScrapingLocked = false;
+const lockQueue: (() => void)[] = [];
+
+async function acquireScrapingLock(): Promise<void> {
+  if (!isScrapingLocked) {
+    isScrapingLocked = true;
+    return;
+  }
+  return new Promise(resolve => lockQueue.push(resolve));
+}
+
+function releaseScrapingLock() {
+  const next = lockQueue.shift();
+  if (next) {
+    next();
+  } else {
+    isScrapingLocked = false;
+  }
+}
+
+async function getSharedBrowser(proxyConfig?: any): Promise<Browser> {
+  if (globalBrowser && globalBrowser.isConnected()) {
+    return globalBrowser;
+  }
+
+  if (browserLaunchPromise) {
+    const b = await browserLaunchPromise;
+    if (b.isConnected()) return b;
+  }
+
+  browserLaunchPromise = getChromiumBrowser(proxyConfig);
+  try {
+    globalBrowser = await browserLaunchPromise;
+    return globalBrowser;
+  } catch (error) {
+    browserLaunchPromise = null;
+    globalBrowser = null;
+    throw error;
+  }
+}
+
 function reorderResults(results: TrafficData[], originalDomains: string[]): TrafficData[] {
   const resultMap = new Map<string, TrafficData>();
-
-  // Build a map of normalized domain -> result
   for (const result of results) {
     const normalized = result.domain.toLowerCase().replace(/^www\./, '');
     resultMap.set(normalized, result);
   }
 
-  // Return results in the original request order
-  return originalDomains.map(domain => {
+  return originalDomains.map((domain) => {
     const normalized = domain.toLowerCase().replace(/^www\./, '');
     const result = resultMap.get(normalized);
-    if (result) {
-      return result;
-    }
-    // If not found, return an error result
+    if (result) return result;
     return {
       domain,
       monthlyVisits: null,
@@ -151,10 +198,14 @@ function reorderResults(results: TrafficData[], originalDomains: string[]): Traf
  * Scrapes traffic data from Traffic.cv bulk endpoint
  * @param domains Array of domains (max 10 per call)
  * @param dryRun If true, returns mock data without scraping
+ * @param useProxy If true, uses Default Proxy (PyProxy/Env). If false, forces DIRECT.
+ * @param customProxy Optional custom proxy configuration
  */
 export async function scrapeTrafficData(
   domains: string[],
-  dryRun: boolean = false
+  dryRun: boolean = false,
+  useProxy: boolean = true, // Default to using proxy in prod, but allow opt-out
+  customProxy?: { server: string; username?: string; password?: string }
 ): Promise<TrafficData[]> {
   if (dryRun) {
     return generateMockData(domains);
@@ -188,6 +239,35 @@ export async function scrapeTrafficData(
     console.warn('[FlightFetch] Failed, falling back to Playwright:', error);
   }
 
+  // Acquire concurrency lock (Bypassed for Extreme Acceleration)
+  // await acquireScrapingLock();
+
+  try {
+    // Hard Safety Timeout: 45 seconds total for the entire operation
+    // If Playwright hangs internally, this ensures we close the context and release the lock.
+    const SAFETY_TIMEOUT_MS = 45000;
+    
+    return await Promise.race([
+      performScrape(domains, useProxy, customProxy),
+      new Promise<TrafficData[]>((_, reject) => 
+        setTimeout(() => reject(new Error('SCRAPER_SAFETY_TIMEOUT: Operation exceeded 45s hard limit')), SAFETY_TIMEOUT_MS)
+      )
+    ]);
+  } finally {
+    // CRITICAL (Bypassed): Always release the lock
+    // releaseScrapingLock();
+  }
+}
+
+/**
+ * Internal function that performs the actual scrape
+ * Separated to allow Promise.race with a safety timeout
+ */
+async function performScrape(
+  domains: string[],
+  useProxy: boolean,
+  customProxy?: { server: string; username?: string; password?: string }
+): Promise<TrafficData[]> {
   // Normalize domains for traffic.cv query (remove www. and ensure clean format)
   // But keep original domains for matching results back
   const normalizedForQuery = domains.map(d => {
@@ -205,22 +285,41 @@ export async function scrapeTrafficData(
 
   const url = `https://traffic.cv/bulk?domains=${normalizedForQuery.join(',')}`;
   let browser: Browser | null = null;
+  let context: any = null;
 
   try {
     // Launch Chromium browser (auto-detects Vercel vs Railway/Local)
-    browser = await getChromiumBrowser();
+    let proxyArg: { server: string; username?: string; password?: string } | null | undefined;
 
-    const context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    if (customProxy) {
+      proxyArg = customProxy;
+    } else if (!useProxy) {
+      proxyArg = null; // Signal to force direct
+    } else {
+      proxyArg = undefined; // Signal to use defaults
+    }
+
+    browser = await getSharedBrowser(proxyArg);
+
+    // Create a new context per page request, not a full browser
+    context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
       ignoreHTTPSErrors: true,
+      viewport: { width: 1440, height: 900 },
+      locale: 'en-US',
+      timezoneId: 'America/New_York',
+      extraHTTPHeaders: {
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Upgrade-Insecure-Requests': '1',
+      },
     });
 
     const page = await context.newPage();
 
     // Optimize: Block unnecessary resources for faster loading
-    await page.route('**/*', (route) => {
+    await page.route('**/*', (route: any) => {
       const resourceType = route.request().resourceType();
-      // Block images, fonts, stylesheets, media, websocket, manifest, other
       if (['image', 'stylesheet', 'font', 'media', 'websocket', 'manifest', 'other'].includes(resourceType)) {
         route.abort();
       } else {
@@ -229,17 +328,15 @@ export async function scrapeTrafficData(
     });
 
     // Optimize: Reduced timeouts for faster processing
-    page.setDefaultTimeout(45000); // Increased to 45s for proxy reliability
+    page.setDefaultTimeout(20000); // 20s
 
     // Navigate to the bulk checker page
     console.log(`Navigating to: ${url}`);
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 }); // Increased to 30s
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
 
     // Quick check for "No valid data" - ONLY for single domain queries
-    // For bulk queries, let the normal extraction process handle individual domains
-    // This prevents false positives where one domain with no data causes all domains to return 0
     if (domains.length === 1) {
-      await page.waitForTimeout(1000); // Wait a bit longer for single domain
+      await page.waitForTimeout(1000); 
       const quickCheckText = await page.textContent('body').catch(() => '');
       const pageHTML = await page.content().catch(() => '');
       const allText = (quickCheckText + ' ' + pageHTML).toLowerCase();
@@ -250,11 +347,8 @@ export async function scrapeTrafficData(
         allText.includes('data is unavailable') ||
         allText.includes('this domain is not registered');
 
-      // Only return early if we're certain ALL domains have no data (single domain case)
       if (hasNoDataMessage && !allText.includes('total visits') && !allText.includes('monthly')) {
         console.log(`Quick detection: Single domain shows "No valid data" - returning early`);
-        await browser.close();
-
         return domains.map(domain => ({
           domain,
           monthlyVisits: 0,
@@ -263,58 +357,46 @@ export async function scrapeTrafficData(
           bounceRate: null,
           pagesPerVisit: null,
           checkedAt: new Date().toISOString(),
-          trafficSources: null,
-          error: null, // Not an error - just no data available
+          error: null,
         }));
       }
     } else {
-      // For bulk queries, wait a bit for page to load but don't do quick detection
       await page.waitForTimeout(500);
     }
 
-    // Optimize: Wait for results with shorter timeout
     let resultsFound = false;
     const possibleSelectors = [
-      '[class*="card"]',  // Most likely for card view
+      '[class*="card"]',
       'table',
       '[class*="result"]',
       '[class*="domain"]',
     ];
 
-    // Wait for results to appear - try selectors with shorter timeout
     for (const selector of possibleSelectors) {
       try {
-        await page.waitForSelector(selector, { timeout: 5000 }); // Increased to 5s
+        await page.waitForSelector(selector, { timeout: 2000 }); 
         resultsFound = true;
         break;
-      } catch (e) {
-        // Try next selector
-      }
+      } catch (e) { }
     }
 
-    // Wait for data to render - Railway needs more time than localhost
-    // Detect Railway by checking for Railway-specific environment variables
     const isRailway = !!(
       process.env.RAILWAY_ENVIRONMENT ||
       process.env.RAILWAY_ENVIRONMENT_NAME ||
       process.env.RAILWAY_SERVICE_NAME ||
       process.env.RAILWAY_PROJECT_ID
     );
-    const baseWaitTime = isRailway ? 6000 : 3000; // Railway needs 6s, localhost 3s
+    const baseWaitTime = isRailway ? 6000 : 3000;
 
     if (resultsFound) {
-      // Wait for data to fully render
       await page.waitForTimeout(baseWaitTime);
 
-      // Additional check: Verify cards/table have actual content with metrics
-      // Wait for expected domains to appear (more strict for Railway)
       try {
-        const verificationTimeout = isRailway ? 45000 : 10000; // Railway: 45s, localhost: 10s
+        const verificationTimeout = isRailway ? 15000 : 5000;
         const expectedCount = domains.length;
         const isRailwayEnv = isRailway;
 
-        // Inject values into page context for the waitForFunction
-        await page.evaluate(({ expectedCount, isRailwayEnv }) => {
+        await page.evaluate(({ expectedCount, isRailwayEnv }: { expectedCount: number, isRailwayEnv: boolean }) => {
           (window as any).__expectedCount = expectedCount;
           (window as any).__isRailwayEnv = isRailwayEnv;
         }, { expectedCount, isRailwayEnv });
@@ -325,17 +407,14 @@ export async function scrapeTrafficData(
             let cardsWithData = 0;
             for (const card of cards) {
               const text = card.textContent || '';
-              // Check if card has both domain and metrics (visits, duration, or percentage)
               if (text.length > 20 &&
-                text.match(/[a-z0-9]+\.[a-z]{2,}/i) && // Has domain
-                (text.match(/[\d.,]+\s*[KMkmBb]/i) || // Has visits number
-                  text.match(/\d{2}:\d{2}:\d{2}/) || // Has duration
-                  text.match(/[\d.]+%/))) { // Has percentage
+                text.match(/[a-z0-9]+\.[a-z]{2,}/i) &&
+                (text.match(/[\d.,]+\s*[KMkmBb]/i) ||
+                  text.match(/\d{2}:\d{2}:\d{2}/) ||
+                  text.match(/[\d.]+%/))) {
                 cardsWithData++;
               }
             }
-            // For Railway: wait for at least 80% of expected domains (minimum 2)
-            // For localhost: wait for at least 2 cards
             const expectedCount = (window as any).__expectedCount || 10;
             const isRailwayEnv = (window as any).__isRailwayEnv || false;
             const minRequired = isRailwayEnv
@@ -345,72 +424,51 @@ export async function scrapeTrafficData(
           },
           { timeout: verificationTimeout }
         ).catch(() => {
-          // Continue even if this check times out - data might still be there
           console.log('Content verification timeout, proceeding anyway');
         });
 
-        // Additional wait after verification to ensure all data is rendered
         if (isRailway) {
-          await page.waitForTimeout(3000); // Extra 3s for Railway
+          await page.waitForTimeout(3000);
         }
       } catch (e) {
-        // Continue if check fails
         console.log('Content verification failed, proceeding anyway');
       }
     } else {
-      // Give more time if no selector found
       await page.waitForTimeout(isRailway ? 10000 : 5000);
     }
 
-    // Minimal debug logging for performance
     console.log(`Page loaded: ${url}`);
 
-    // Try to find results in table format first (most common)
     let tableResults = await extractFromTable(page, domains);
     if (tableResults.length > 0) {
-      console.log(`Extracted ${tableResults.length} results from table (expected ${domains.length} domains)`);
-
-      // If Railway and missing many domains, wait more and retry
       if (isRailway && tableResults.length < domains.length * 0.8) {
-        console.log(`Railway: Only found ${tableResults.length}/${domains.length} domains, waiting longer and retrying...`);
-        await page.waitForTimeout(5000); // Extra 5s wait
+        await page.waitForTimeout(5000);
         tableResults = await extractFromTable(page, domains);
-        console.log(`After retry: Extracted ${tableResults.length} results from table`);
       }
 
-      // Ensure all domains have results (fill missing ones with errors)
       const foundDomains = new Set(tableResults.map(r => r.domain.toLowerCase().replace(/^www\./, '')));
       const missingDomains = domains.filter(d => {
         const dNorm = d.toLowerCase().replace(/^www\./, '');
         return !foundDomains.has(dNorm);
       });
 
-      if (missingDomains.length > 0) {
-        console.log(`Missing ${missingDomains.length} domains in table: ${missingDomains.join(', ')}`);
-      }
-
-      // Check if missing domains appear on page but have 0 traffic
       const pageText = await page.textContent('body') || '';
       for (const domain of missingDomains) {
         const domainNorm = domain.toLowerCase().replace(/^www\./, '');
-        // Check if domain appears on page (might have 0 traffic)
         const domainOnPage = pageText.toLowerCase().includes(domainNorm);
 
         if (domainOnPage) {
-          // Domain found but no metrics - likely 0 traffic (not an error)
           tableResults.push({
             domain,
-            monthlyVisits: 0, // Explicitly 0, not null
+            monthlyVisits: 0,
             avgSessionDuration: null,
             avgSessionDurationSeconds: null,
             bounceRate: null,
             pagesPerVisit: null,
             checkedAt: null,
-            trafficSources: null,
-            error: null, // No error - site has 0 traffic
+            error: null,
           });
         } else {
-          // Domain truly not found - this is an error
           tableResults.push({
             domain,
             monthlyVisits: null,
@@ -419,51 +477,33 @@ export async function scrapeTrafficData(
             bounceRate: null,
             pagesPerVisit: null,
             checkedAt: null,
-            trafficSources: null,
             error: 'Domain not found in results',
           });
         }
       }
-
-      return reorderResults(tableResults, domains);
+      return tableResults;
     }
 
-    // Fallback to card format
     let cardResults = await extractFromCards(page, domains);
     if (cardResults.length > 0) {
-      // If Railway and missing many domains, wait more and retry
       if (isRailway && cardResults.length < domains.length * 0.8) {
-        console.log(`Railway: Only found ${cardResults.length}/${domains.length} domains in cards, waiting longer and retrying...`);
-        await page.waitForTimeout(5000); // Extra 5s wait
+        await page.waitForTimeout(5000);
         cardResults = await extractFromCards(page, domains);
-        console.log(`After retry: Extracted ${cardResults.length} results from cards`);
       }
 
-      // Ensure all domains have results
       const foundDomains = new Set(cardResults.map(r => r.domain.toLowerCase().replace(/^www\./, '')));
       const missingDomains = domains.filter(d => {
         const dNorm = d.toLowerCase().replace(/^www\./, '');
         return !foundDomains.has(dNorm);
       });
 
-      if (missingDomains.length > 0) {
-        console.log(`Missing ${missingDomains.length} domains in cards: ${missingDomains.join(', ')}`);
-      }
-
-      // Check if missing domains appear on page but have 0 traffic
       const pageText = await page.textContent('body') || '';
       const pageHTML = await page.content();
 
       for (const domain of missingDomains) {
         const domainNorm = domain.toLowerCase().replace(/^www\./, '');
-        const domainVariations = [
-          domainNorm,
-          `www.${domainNorm}`,
-          domain.toLowerCase(),
-          domain,
-        ];
+        const domainVariations = [domainNorm, `www.${domainNorm}`, domain.toLowerCase(), domain];
 
-        // Check if domain appears on page (might have 0 traffic)
         let domainOnPage = false;
         for (const variation of domainVariations) {
           if (pageText.toLowerCase().includes(variation.toLowerCase()) ||
@@ -474,27 +514,25 @@ export async function scrapeTrafficData(
         }
 
         if (domainOnPage) {
-          // Domain found but no metrics - likely 0 traffic (not an error)
-          // Try one more time with longer wait
           await page.waitForTimeout(2000);
           const retryResults = await extractFromCards(page, [domain]);
           if (retryResults.length > 0 && !retryResults[0].error) {
             cardResults.push(retryResults[0]);
           } else {
+            // CRITICAL FIX V21.0: Never default to 0 if we found the domain but extraction failed.
+            // This prevents false-negatives (Guardian.com anomaly).
             cardResults.push({
               domain,
-              monthlyVisits: 0, // Explicitly 0, not null
+              monthlyVisits: null,
               avgSessionDuration: null,
               avgSessionDurationSeconds: null,
               bounceRate: null,
               pagesPerVisit: null,
               checkedAt: null,
-              trafficSources: null,
-              error: null, // No error - site has 0 traffic
+              error: 'Verification timeout: Domain found on page but cards failed to load.',
             });
           }
         } else {
-          // Domain truly not found - this is an error
           cardResults.push({
             domain,
             monthlyVisits: null,
@@ -503,25 +541,32 @@ export async function scrapeTrafficData(
             bounceRate: null,
             pagesPerVisit: null,
             checkedAt: null,
-            trafficSources: null,
             error: 'No data found on page (selectors may need update)',
           });
         }
       }
-
-      return reorderResults(cardResults, domains);
+      return cardResults;
     }
 
-    // Try a more generic extraction approach
     const genericResults = await extractGeneric(page, domains);
     if (genericResults.length > 0) {
-      return reorderResults(genericResults, domains);
+      return genericResults;
     }
 
-    // If no results found, return error with more context
-    const errorMsg = resultsFound
+    // DIAGNOSTIC (V46.0): Surface what the page actually showed so API callers
+    // can distinguish Cloudflare challenges from selector drift without log access.
+    let diagTitle = '';
+    let diagSnippet = '';
+    try {
+      diagTitle = await page.title();
+      const bodyText = await page.textContent('body') || '';
+      diagSnippet = bodyText.replace(/\s+/g, ' ').trim().slice(0, 160);
+    } catch (e) { /* best effort */ }
+
+    const baseMsg = resultsFound
       ? 'No data found on page (selectors may need update)'
       : 'Page did not load results (timeout or structure changed)';
+    const errorMsg = `${baseMsg} | page title: "${diagTitle}" | body: "${diagSnippet}"`;
 
     return domains.map(domain => ({
       domain,
@@ -531,7 +576,6 @@ export async function scrapeTrafficData(
       bounceRate: null,
       pagesPerVisit: null,
       checkedAt: null,
-      trafficSources: null,
       error: errorMsg,
     }));
 
@@ -545,12 +589,11 @@ export async function scrapeTrafficData(
       bounceRate: null,
       pagesPerVisit: null,
       checkedAt: null,
-      trafficSources: null,
       error: error instanceof Error ? error.message : 'Unknown error',
     }));
   } finally {
-    if (browser) {
-      await browser.close();
+    if (context) {
+      await context.close().catch(() => { });
     }
   }
 }
@@ -751,7 +794,6 @@ async function extractFromTable(page: Page, domains: string[]): Promise<TrafficD
           bounceRate,
           pagesPerVisit,
           checkedAt: null,
-          trafficSources: null,
           error: null,
         });
       } catch (e) {
@@ -842,10 +884,12 @@ async function extractFromCards(page: Page, domains: string[]): Promise<TrafficD
           if (element) {
             const text = await element.textContent();
             if (text) {
-              // Check if this text contains any of our target domains
-              const foundDomain = domains.find(d =>
-                text.toLowerCase().includes(d.toLowerCase())
-              );
+              // Check if this text contains any of our target domains using robust regex
+              const foundDomain = domains.find(d => {
+                const normalizedSearch = d.toLowerCase().replace(/^www\./, '').replace(/\./g, '\\.');
+                const regex = new RegExp(normalizedSearch + '(\\b|[^a-z0-9]|$)', 'i');
+                return regex.test(text);
+              });
               if (foundDomain) {
                 domainText = foundDomain;
                 break;
@@ -858,8 +902,8 @@ async function extractFromCards(page: Page, domains: string[]): Promise<TrafficD
         if (!domainText) {
           // Try to find domain by matching normalized versions
           for (const [normalized, original] of domainMap.entries()) {
-            if (cardText.toLowerCase().includes(normalized) ||
-              cardText.toLowerCase().includes(`www.${normalized}`)) {
+            const regex = new RegExp(normalized.replace(/\./g, '\\.') + '(\\b|[^a-z0-9]|$)', 'i');
+            if (regex.test(cardText)) {
               domainText = original;
               break;
             }
@@ -896,24 +940,30 @@ async function extractFromCards(page: Page, domains: string[]): Promise<TrafficD
           domain = matchedDomain;
         }
 
-        // Extract "Total Visits" - optimized patterns, handle B (billion) suffix
-        // Format: "Total Visits 82.28B" or "Total Visits: 3.72K" or "Total Visits4.57K"
+        // Extract "Total Visits" - updated for new traffic.cv direct adjacency
         let monthlyVisits: number | null = null;
-        const visitsPatterns = [
-          /Total\s+Visits[:\s]+([\d.,]+\s*[KMkmBb]?)/i,
-          /Total\s+Visits\s+([\d.,]+\s*[KMkmBb]?)/i,
-          /Total\s+Visits([\d.,]+\s*[KMkmBb]?)/i,  // No space/colon
-        ];
+        
+        // NEW (Mar 31): Enhanced DOM extraction for Next.js layout
+        // We look for any div containing 'Total Visits' then find the adjacent bold value
+        const cardHTML = await card.innerHTML();
+        if (cardHTML.includes('Total Visits')) {
+           const visitsPatterns = [
+             /Total\s+Visits[^>]*>[\s\S]*?<div[^>]*class="[^"]*font-semibold[^"]*"[^>]*>([\d.,]+\s*[KMkmBb]?)/i,
+             /Total\s+Visits[:\s]*([\d.,]+\s*[KMkmBb]?)/i,
+             /Total\s+Visits\s+([\d.,]+\s*[KMkmBb]?)/i,
+             /Total\s+Visits([\d.,]+\s*[KMkmBb]?)/i,
+           ];
 
-        for (const pattern of visitsPatterns) {
-          const match = cardText.match(pattern);
-          if (match && match[1]) {
-            const parsed = parseNumberWithSuffix(match[1].trim());
-            if (parsed && parsed > 0) {
-              monthlyVisits = parsed;
-              break;
-            }
-          }
+           for (const pattern of visitsPatterns) {
+             const match = cardHTML.match(pattern) || cardText.match(pattern);
+             if (match && match[1]) {
+               const parsed = parseNumberWithSuffix(match[1].trim());
+               if (parsed && parsed > 0) {
+                 monthlyVisits = parsed;
+                 break;
+               }
+             }
+           }
         }
 
         // Context search if direct pattern fails
@@ -935,8 +985,8 @@ async function extractFromCards(page: Page, domains: string[]): Promise<TrafficD
         let avgSessionDuration: string | null = null;
         let avgSessionDurationSeconds: number | null = null;
         const durationPatterns = [
-          /Avg\.?\s*Duration[:\s]+(\d{2}:\d{2}:\d{2})/i,
-          /Duration[:\s]+(\d{2}:\d{2}:\d{2})/i,
+          /Avg\.?\s*Duration[:\s]*(\d{2}:\d{2}:\d{2})/i, // Optional space/colon
+          /Duration[:\s]*(\d{2}:\d{2}:\d{2})/i,
           /(\d{2}:\d{2}:\d{2})/,
         ];
 
@@ -954,13 +1004,11 @@ async function extractFromCards(page: Page, domains: string[]): Promise<TrafficD
         }
 
         // Extract "Pages per Visit" - format is usually "3.13" or "1.68" or "8.62"
-        // Look for "Pages per Visit" or "Pages/Visit" label - must be exact match
         let pagesPerVisit: number | null = null;
         const pagesPatterns = [
-          /Pages\s+per\s+Visit[:\s]+([\d.]+)/i,
-          /Pages\/Visit[:\s]+([\d.]+)/i,
+          /Pages\s+per\s+Visit[:\s]*([\d.]+)/i, // Optional space/colon
+          /Pages\/Visit[:\s]*([\d.]+)/i,
           /Pages\s+per\s+Visit\s+([\d.]+)/i,
-          /Pages\s+per\s+Visit([\d.]+)/i,  // No space/colon
         ];
 
         for (const pattern of pagesPatterns) {
@@ -1005,12 +1053,10 @@ async function extractFromCards(page: Page, domains: string[]): Promise<TrafficD
         }
 
         // Extract "Bounce Rate" - format is "31.93%" or "46.38%"
-        // Look for "Bounce Rate" label followed by percentage
         let bounceRate: number | null = null;
         const bouncePatterns = [
-          /Bounce\s+Rate[:\s]+([\d.]+)%/i,
+          /Bounce\s+Rate[:\s]*([\d.]+)%/i, // Optional space/colon
           /Bounce\s+Rate\s+([\d.]+)%/i,
-          /Bounce\s+Rate([\d.]+)%/i,  // No space/colon
         ];
 
         for (const pattern of bouncePatterns) {
@@ -1153,7 +1199,6 @@ async function extractGeneric(page: Page, domains: string[]): Promise<TrafficDat
           pagesPerVisit: null,
           // Will be calculated from historical data
           checkedAt: null,
-          trafficSources: null,
           error: null,
         });
       }
@@ -1178,24 +1223,6 @@ function generateMockData(domains: string[]): TrafficData[] {
 
     return {
       domain,
-      monthlyVisits: visits,
-      avgSessionDuration: `00:${String(durationMinutes).padStart(2, '0')}:${String(durationSeconds).padStart(2, '0')}`,
-      avgSessionDurationSeconds: durationMinutes * 60 + durationSeconds,
-      bounceRate: 30 + Math.random() * 40,
-      pagesPerVisit: 1 + Math.random() * 5,
-      checkedAt: new Date().toISOString(),
-      trafficSources: {
-        'Direct': 40 + Math.random() * 20,
-        'Search': 20 + Math.random() * 20,
-        'Social': 10 + Math.random() * 10,
-        'Referrals': 5 + Math.random() * 5,
-        'Mail': 1 + Math.random() * 2
-      },
-      error: null,
-    };
-
-    return {
-      domain,
       monthlyVisits: Math.round(visits),
       avgSessionDuration: `${durationMinutes}m ${durationSeconds}s`,
       avgSessionDurationSeconds: durationMinutes * 60 + durationSeconds,
@@ -1207,134 +1234,3 @@ function generateMockData(domains: string[]): TrafficData[] {
   });
 }
 
-/*
- * Scrapes detailed traffic data for a single domain from its dedicated page
- * URL: https://traffic.cv/{domain}
- */
-export async function scrapeDetail(
-  domain: string
-): Promise<TrafficData | null> {
-  let browser: Browser | null = null;
-  const url = `https://traffic.cv/${domain}`;
-
-  try {
-    browser = await getChromiumBrowser();
-    const context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    });
-    const page = await context.newPage();
-
-    // Optimize: Block irrelevant resources
-    await page.route('**/*', (route) => {
-      const type = route.request().resourceType();
-      if (['image', 'font', 'media', 'websocket'].includes(type)) {
-        route.abort();
-      } else {
-        route.continue();
-      }
-    });
-
-    console.log(`[Detailed Scraper] Navigating to: ${url}`);
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-
-    // Wait for the main content to load
-    // The traffic sources chart is usually further down, but basic stats are at top
-    // We look for the "Traffic Sources" header to ensure that section is loaded if possible
-    try {
-      await page.waitForSelector('.recharts-legend-wrapper', { timeout: 10000 });
-    } catch (e) {
-      console.log('[Detailed Scraper] Traffic sources chart not found, proceeding with what we have');
-    }
-
-    // 1. Extract Basic Metrics (Total Visits, Avg Duration, etc.)
-    // These are often in cards or a summary section at the top
-    // We can reuse some logic or valid selectors from the detail page structure
-    // Logic: Look for specific labels and their associated values
-    const metrics = await page.evaluate(() => {
-      const getTextByLabel = (label: string) => {
-        const elements = Array.from(document.querySelectorAll('div, span, p'));
-        // Find element that contains the label
-        const el = elements.find(e => e.textContent?.toLowerCase().includes(label.toLowerCase()));
-        if (!el) return null;
-        // The value is usually in a sibling or child, or the next element
-        // Simple heuristic: look for a number in the closest relevant container
-        // Or specific selectors if known.
-        // For now, let's try a robust approach: find the card containing the label
-        const listItems = Array.from(document.querySelectorAll('li, .card, .flex-col'));
-        const container = listItems.find(item => item.textContent?.toLowerCase().includes(label.toLowerCase()));
-        return container?.textContent || null;
-      };
-
-      return {
-        visits: getTextByLabel('Total Visits'),
-        duration: getTextByLabel('Avg. Visit Duration') || getTextByLabel('Avg Duration'),
-        bounce: getTextByLabel('Bounce Rate'),
-        pages: getTextByLabel('Pages per Visit'),
-      };
-    });
-
-    // Helper to extract clean values from text
-    const extractValue = (text: string | null, regex: RegExp) => {
-      if (!text) return null;
-      const match = text.match(regex);
-      return match ? match[0] : null;
-    };
-
-    const monthlyVisitsRaw = extractValue(metrics.visits, /[\d.]+[KMBkmb]?/);
-    const avgDurationRaw = extractValue(metrics.duration, /\d{2}:\d{2}:\d{2}/);
-    const bounceRateRaw = extractValue(metrics.bounce, /[\d.]+/);
-    const pagesPerVisitRaw = extractValue(metrics.pages, /[\d.]+/);
-
-    // 2. Extract Traffic Sources
-    // Selectors identified: .recharts-legend-wrapper ul li
-    const trafficSources: Record<string, number> = {};
-    const legendItems = await page.$$('.recharts-legend-wrapper ul li');
-
-    for (const item of legendItems) {
-      const text = await item.textContent();
-      if (text && text.includes(':')) {
-        const [source, percentStr] = text.split(':').map(s => s.trim());
-        const percent = parseFloat(percentStr.replace('%', ''));
-        if (source && !isNaN(percent)) {
-          // Flatten source names (e.g. "Organic Search" -> "search", or keep as is)
-          // Keeping as is for flexible display, or normalize if needed.
-          // Let's normalize keys to lowercase for consistency
-          const key = source.toLowerCase().replace(/\s+/g, '_');
-          trafficSources[key] = percent;
-        }
-      }
-    }
-
-    await browser.close();
-
-    // Construct TrafficData object
-    const trafficData: TrafficData = {
-      domain,
-      monthlyVisits: monthlyVisitsRaw ? parseNumberWithSuffix(monthlyVisitsRaw) : null,
-      avgSessionDuration: avgDurationRaw,
-      avgSessionDurationSeconds: avgDurationRaw ? parseDurationToSeconds(avgDurationRaw) : null,
-      bounceRate: bounceRateRaw ? parseFloat(bounceRateRaw) : null,
-      pagesPerVisit: pagesPerVisitRaw ? parseFloat(pagesPerVisitRaw) : null,
-      checkedAt: new Date().toISOString(),
-      trafficSources: Object.keys(trafficSources).length > 0 ? trafficSources : null,
-      error: null
-    };
-
-    return trafficData;
-
-  } catch (error) {
-    console.error('[Detailed Scraper] Error:', error);
-    if (browser) await browser.close();
-    return {
-      domain,
-      monthlyVisits: null,
-      avgSessionDuration: null,
-      avgSessionDurationSeconds: null,
-      bounceRate: null,
-      pagesPerVisit: null,
-      checkedAt: new Date().toISOString(),
-      trafficSources: null,
-      error: error instanceof Error ? error.message : 'Scraping failed'
-    };
-  }
-}

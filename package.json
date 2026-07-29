@@ -20,6 +20,8 @@
     "qa:loop": "tsx scripts/ralph-wiggum-agent.ts",
     "qa:loop:full": "tsx scripts/ralph-wiggum-agent.ts --full",
     "qa:loop:quick": "tsx scripts/ralph-wiggum-agent.ts --quick",
+    "health:check": "tsx scripts/playwright-health-cron.ts",
+    "health:cron:setup": "bash scripts/setup-health-cron.sh",
     "test:email": "tsx scripts/test-email.ts",
     "data:quality": "tsx scripts/data-quality-agent.ts",
     "pre-deploy": "tsx scripts/pre-deployment-agent.ts",
@@ -38,10 +40,12 @@
     "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.4.23",
     "better-sqlite3": "^11.10.0",
+    "crawlee": "^3.16.0",
+    "dotenv": "^16.4.7",
     "next": "^16.1.1",
     "nodemailer": "^7.0.12",
     "playwright": "^1.57.0",
-    "playwright-core": "^1.57.0",
+    "playwright-core": "^1.59.1",
     "postcss": "^8.5.6",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
@@ -51,6 +55,7 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
+    "@types/dotenv": "^8.2.3",
     "@types/nodemailer": "^7.0.4",
     "tsx": "^4.21.0"
   }

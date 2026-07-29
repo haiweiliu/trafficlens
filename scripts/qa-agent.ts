@@ -69,7 +69,7 @@ async function attemptScrapeWithRetry(domains: string[], maxRetries = 3): Promis
         await new Promise(resolve => setTimeout(resolve, 2000 * i)); // Exponential backoff
       }
 
-      const results = await scrapeTrafficData(domains, false);
+      const results = await scrapeTrafficData(domains, false, false);
 
       // If any result has a critical error (like "Proxy Error"), consider it a failure for the batch
       // But "No valid data" is a valid result (just empty), so we don't retry for that
@@ -88,7 +88,7 @@ async function attemptScrapeWithRetry(domains: string[], maxRetries = 3): Promis
 
   // If we exhausted retries, return the last attempt's result (or throw)
   // To keep interface consistent, we'll run one last time to return whatever we get
-  return await scrapeTrafficData(domains, false);
+  return await scrapeTrafficData(domains, false, false);
 }
 
 /**
@@ -136,7 +136,7 @@ async function testDataExtraction(): Promise<QAResult> {
   const testName = 'Data Extraction';
   try {
     const testDomains = ['google.com'];
-    const results = await scrapeTrafficData(testDomains, false);
+    const results = await scrapeTrafficData(testDomains, false, false);
 
     if (results.length === 0 || results[0].error) {
       return {
@@ -319,7 +319,7 @@ async function testRealDomainTraffic(): Promise<QAResult> {
     const sampleDomains = REAL_DOMAIN_TEST_SUITE.slice(0, 5);
     console.log(`  Testing ${sampleDomains.length} real domains...`);
 
-    const results = await scrapeTrafficData(sampleDomains, false);
+    const results = await scrapeTrafficData(sampleDomains, false, false);
 
     if (results.length === 0) {
       return {
@@ -383,7 +383,7 @@ async function testErrorHandling(): Promise<QAResult> {
   try {
     // Test with invalid domain (should return monthlyVisits: 0 for "No valid data")
     const invalidDomains = ['invalid-domain-that-does-not-exist-12345.com'];
-    const results = await scrapeTrafficData(invalidDomains, false);
+    const results = await scrapeTrafficData(invalidDomains, false, false);
 
     if (results.length === 0) {
       return {
