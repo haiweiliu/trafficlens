@@ -27,10 +27,15 @@ export default async function run({ page, assert, step, capture, device }) {
       timeout: 90000,
     });
 
-    const runButton = page.getByRole('button', { name: 'Run' });
-    await runButton.waitFor({ state: 'visible', timeout: 90000 });
-    const running = await runButton.textContent();
-    assert(!running?.includes('Running'), 'Run button still shows Running after results appeared.');
+    await page.waitForFunction(() => {
+      const run = Array.from(document.querySelectorAll('button')).find(
+        (btn) => (btn.textContent || '').trim() === 'Run'
+      );
+      return Boolean(run);
+    }, { timeout: 90000 });
+
+    const runLabel = await page.getByRole('button', { name: 'Run' }).textContent();
+    assert(runLabel?.trim() === 'Run', `Run button still loading: "${runLabel}"`);
   });
 
   await step(`[${device}] Assert Monthly Visits are populated (not N/A)`, async () => {

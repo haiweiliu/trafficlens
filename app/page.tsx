@@ -71,10 +71,7 @@ export default function Home() {
       }
 
       const data: TrafficResponse = await response.json();
-      
-      // Show cached results immediately
-      setResults(data.results);
-      
+
       const cacheHits = data.metadata.cacheHits;
       const cacheMisses = data.metadata.cacheMisses;
       const totalDomains = data.metadata.totalDomains;
@@ -84,19 +81,24 @@ export default function Home() {
           r.error?.includes('Still scraping') ||
           r.error?.includes('Scraping in background')
       );
+      const syncComplete = !backgroundScraping && !stillPending;
 
-      // Sync scrape path: API returns complete rows with backgroundScraping=false
-      if (cacheHits === totalDomains || (!backgroundScraping && !stillPending)) {
+      if (syncComplete || cacheHits === totalDomains) {
+        setLoading(false);
+      }
+
+      setResults(data.results);
+
+      if (syncComplete || cacheHits === totalDomains) {
         if (cacheHits === totalDomains) {
           setProgress(`✅ All ${cacheHits} domains served from cache (instant)`);
         } else {
           setProgress(`✅ Done! ${totalDomains} domains loaded.`);
         }
-        setLoading(false);
         setTimeout(() => setProgress(''), 3000);
         return;
       }
-      
+
       if (cacheMisses > 0) {
         setProgress(`📦 ${cacheHits} from cache (instant). ⏳ Scraping ${cacheMisses} new domains...`);
         
