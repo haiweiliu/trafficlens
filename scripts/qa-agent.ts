@@ -439,10 +439,14 @@ async function autoFixScrapingErrors(): Promise<{ fixed: boolean; details: strin
  */
 async function autoFixStaleCache(): Promise<{ fixed: boolean; details: string }> {
   try {
-    // This would clear cache entries that are older than expected
-    // Implementation would go here
-    console.log('Auto-fix: Stale cache entries cleared');
-    return { fixed: true, details: 'Stale cache entries cleared' };
+    const { purgeIncompleteTrafficCache } = await import('../lib/db');
+    const purged = purgeIncompleteTrafficCache();
+    if (purged > 0) {
+      console.log(`Auto-fix: Purged ${purged} incomplete cache entries`);
+      return { fixed: true, details: `Purged ${purged} incomplete cache entries` };
+    }
+    console.log('Auto-fix: No incomplete cache entries to purge');
+    return { fixed: false, details: 'No incomplete cache entries found; check isDataFresh logic' };
   } catch (error) {
     return {
       fixed: false,

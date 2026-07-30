@@ -478,7 +478,7 @@ export function isDataFresh(domain: string, maxAgeDays: number = 30): boolean {
 
   // Try both variations
   const stmt = database.prepare(`
-    SELECT checked_at, month_year FROM traffic_latest 
+    SELECT checked_at, month_year, monthly_visits FROM traffic_latest 
     WHERE domain = ? OR domain = ?
   `);
 
